@@ -1,0 +1,28 @@
+{
+	"name": "PMCMC_vertical_farming",
+	"build": {
+		"context": "..",
+		"dockerfile": "Dockerfile"
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"julialang.language-julia"
+			],
+			"settings": {
+    			"editor.formatOnSave": true,
+    			"julia.executablePath": "/usr/local/bin/julia"
+			}
+		}
+	},
+	"remoteUser": "developer",
+	"workspaceFolder": "/home/developer/PMCMC_vertical_farming/",
+	"mounts": [
+		"source=${localWorkspaceFolder},target=/home/developer/PMCMC_vertical_farming/,type=bind",
+		"source=${localEnv:SSH_AUTH_SOCK},target=/ssh-agent,type=bind"
+	],
+	"remoteEnv": {
+		"SSH_AUTH_SOCK": "/ssh-agent"
+	},
+	"postCreateCommand": "julia -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'"
+}
