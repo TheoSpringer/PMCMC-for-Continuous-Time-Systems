@@ -24,5 +24,5 @@
 	"remoteEnv": {
 		"SSH_AUTH_SOCK": "/ssh-agent"
 	},
-	"postCreateCommand": "julia -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'"
+	"postCreateCommand": "julia -e 'using Pkg; Pkg.activate(\".\")'"
 }
