@@ -40,11 +40,14 @@ USER ${USER_NAME}
 # Set the working directory to the user's home directory.
 WORKDIR ${USER_HOME}
 
+# Create a Julia package depot
+ENV JULIA_DEPOT_PATH="/home/developer/.julia"
+
 # Copy Project.toml and Manifest.toml, copy and extract HSL_jll.jl, and install all packages.
 COPY --chown=${USER_NAME}:${USER_NAME} Project.toml Manifest.toml ${USER_HOME}/
 COPY --chown=${USER_NAME}:${USER_NAME} .devcontainer/HSL_jll.jl.v2024.11.28.tar.gz ${USER_HOME}/
 RUN tar -xzvf HSL_jll.jl.v2024.11.28.tar.gz \
-    && julia -e 'using Pkg; Pkg.develop(path="HSL_jll.jl.v2024.11.28"); Pkg.instantiate(); Pkg.precompile()' \
+    && julia -e 'using Pkg; Pkg.activate("."); Pkg.develop(path="HSL_jll.jl.v2024.11.28"); Pkg.instantiate()' \
     && rm HSL_jll.jl.v2024.11.28.tar.gz \
     && rm HSL_jll.pdf\
     && rm build_tarballs.jl \
