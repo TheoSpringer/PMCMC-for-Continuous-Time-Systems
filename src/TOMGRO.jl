@@ -398,9 +398,9 @@ function calc(inT, inPPFD, inCO2)
     delWf = Float64[]
 
     # Simulation length in h
-    length = Int(floor(length(inT) / 24)) * 24
+    sim_length = Int(floor(length(inT) / 24)) * 24
 
-    for i in 1:24:length
+    for i in 1:24:sim_length
         # Reset variables
         dNdt_ = 0.0
         Td = 0.0
@@ -489,19 +489,6 @@ function pseudoClimate(days=100)
 end
 
 """
-Plot the results over time.
-
-# Arguments
-- `y`: Array of values to plot
-- `title`: Title of the plot
-- `xlabel`: Label for the x-axis
-- `ylabel`: Label for the y-axis
-"""
-function dayPlot(y; title="", xlabel="", ylabel="")
-    plot(y, title=title, xlabel=xlabel, ylabel=ylabel, lw=2)
-end
-
-"""
 Plot the input climate data.
 
 # Arguments
@@ -514,10 +501,14 @@ function inputPlot(datas)
     CO2 = datas["CO2"]
     t = range(0, length(T) / 24, length=length(T))
 
-    plot(t, T, xlabel="day", ylabel="Temperature in °C", title="Temperature Over Time")
-    plot(t, PPFD, xlabel="day", ylabel="PPFD in μmol/m²/s", title="PPFD Over Time")
-    plot(t, RAD, xlabel="day", ylabel="Radiation in MJ/m²/day", title="Radiation Over Time")
-    plot(t, CO2, xlabel="day", ylabel="CO2 in ppm", title="CO2 Concentration Over Time")
+    p1 = plot(t, T, xlabel="day", ylabel="Temperature in °C", title="Temperature Over Time", lw=2)
+    display(p1)
+    p2 = plot(t, PPFD, xlabel="day", ylabel="PPFD in μmol/m²/s", title="PPFD Over Time", lw=2)
+    display(p2)
+    p3 = plot(t, RAD, xlabel="day", ylabel="Radiation in MJ/m²/day", title="Radiation Over Time", lw=2)
+    display(p3)
+    p4 = plot(t, CO2, xlabel="day", ylabel="CO2 in ppm", title="CO2 Concentration Over Time", lw=2)
+    display(p4)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
@@ -530,7 +521,8 @@ if abspath(PROGRAM_FILE) == @__FILE__
         ("W_hist", "Above Ground dry weight (g/m²)"),
         ("Wf_hist", "Total fruit dry weight (g/m²)"),
         ("Wm_hist", "Mature fruit dry weight (g/m²)")]
-        dayPlot(results[key], xlabel="day", title="TOMGRO", ylabel=label)
+        p = plot(results[key], xlabel="day", title="TOMGRO", ylabel=label, lw=2)
+        display(p)
     end
     inputPlot(datas)
 end

@@ -29,6 +29,5 @@ mutable struct PG_sample
 end
 
 include("particle_Gibbs.jl")
-include("optimal_control_Altro.jl")
 include("optimal_control_Ipopt.jl")
 end
