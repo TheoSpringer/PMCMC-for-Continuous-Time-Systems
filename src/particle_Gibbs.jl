@@ -1,7 +1,7 @@
 """
-    particle_MMH(u, y, K, K_b, k_d, N, f_theta::Function, p_theta::Function, propose_theta::Function, theta_init, sample_x_init::Function, sample_process_noise, g::Function, R; x_prim=nothing)
+    particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Function, log_pdf_w::Function, sample_x_init::Function)
 
-Run a particle smoother with ancestor sampling to obtain samples ``\\{x_{T:-1}\\}^{[1:K]}`` from the conditional state distribution ``p(x_{T:-1} \\mid \\theta \\mathbb{D}=\\{u_{T:-1}, y_{T:-1}\\})``.
+Run a particle filter with ancestor sampling to approximate the log-marginal likelihood ``\\log p(y_{0:t} \\mid \\theta, \\{u_{0:t}\\})``.
 
 # Arguments
 - `u`: training input trajectory
@@ -10,73 +10,52 @@ Run a particle smoother with ancestor sampling to obtain samples ``\\{x_{T:-1}\\
 - `N`: number of particles
 - `f`: state transition function; has inputs (x, u)
 - `g`: measurement function; has inputs (x, u)
-- `sample_v`: function that returns a sample from the process noise distribution; has no inputs
-- `p_v_theta`: probability density function of the process noise parametrized by theta; has inputs (theta, v)
-- `log_p_w`: function that returns the logarithm of the probability density function of the measurement noise; has input (w)
+- `sample_v`: function that returns N samples from the process noise distribution; has input (N)
+- `pdf_v`: probability density function of the process noise; has input (v)
+- `log_pdf_w`: function that returns the logarithm of the probability density function of the measurement noise; has input (w)
 - `sample_x_init`: function that returns a sample from the distribution over initial states; has no inputs
-- `x_prim`: prespecified trajectory for the first iteration
 
-This function is based on the papers
-
-    Andrieu, Christophe, Arnaud Doucet, and Roman Holenstein. "Particle markov chain monte carlo methods." Journal of the Royal Statistical Society Series B: Statistical Methodology 72.3 (2010): 269-342.
-
-    F. Lindsten, T. B. Schön, and M. Jordan, “Ancestor sampling for particle Gibbs,” Advances in Neural Information Processing Systems, vol. 25, 2012.
+# Returns
+- `x_pf`: state trajectories of particles
+- `w`: normalized weights of particles
+- `log_likelihood`: log-marginal likelihood estimate
 """
-function particle_smoother(u, y, n_x, N, f::Function, g::Function, sample_v::Function, log_p_w::Function, x_prim=nothing, p_v=nothing)
+function particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Function, log_pdf_w::Function, sample_x_init::Function)
     # Initialize and pre-allocate.
     T = size(y, 2)
     w = Array{Float64}(undef, T, N)
     x_pf = Array{Float64}(undef, n_x, N, T)
     a = Array{Int64}(undef, T, N)
-    waN = Array{Float64}(undef, N)
     log_w = Array{Float64}(undef, N)
+    log_likelihood = 0.0
 
-    if x_prim === nothing
-        for n in 1:N
-            x_pf[:, n, 1] .= sample_x_init()
-        end
-        use_AS = false
-    else
-        if p_v === nothing
-            error("If x_prim is specified, i.e., ancestor sampling is used, p_v must be provided.")
-        end
-        x_pf[:, end, :] .= x_prim
-        for n in 1:N-1
-            x_pf[:, n, 1] .= sample_x_init()
-        end
-        use_AS = true
+    # Sample initial states.
+    for n in 1:N
+        x_pf[:, n, 1] .= sample_x_init()
     end
 
-    # Particle filter (resampling, propagation, and ancestor sampling)
+    # Particle filter.
     for t in 1:T
         if t >= 2
-            if use_AS # Run the conditional PF with ancestor sampling.
-                # Resample particles (= sample ancestors).
-                a[t, 1:N-1] .= sample(1:N, Weights(w[t-1, :]), N - 1)
+            # Resample particles.
+            a[t, :] .= sample(1:N, Weights(w[t-1, :]), N)
 
-                # Propagate resampled particles.
-                x_pf[:, 1:N-1, t] .= f(x_pf[:, a[t, 1:N-1], t-1], repeat(u[:, t-1], 1, N - 1)) + sample_v()
-
-                # Sample ancestors of prespecified trajectory x_prim.
-                waN .= w[t-1, :] .* p_v(x_pf[:, N, t] .- f(x_pf[:, :, t-1], repeat(u[:, t-1], 1, N)))
-                waN .= waN ./ sum(waN)
-                a[t, N] = sample(1:N, Weights(waN))
-
-            else # Run a standard PF.
-                # Resample particles.
-                a[t, :] .= sample(1:N, Weights(w[t-1, :]), N)
-
-                # Propagate resampled particles.
-                x_pf[:, :, t] .= f(x_pf[:, a[t, :], t-1], repeat(u[:, t-1], 1, N)) + sample_v()
-            end
+            # Propagate resampled particles.
+            x_pf[:, :, t] .= f(x_pf[:, a[t, :], t-1], repeat(u[:, t-1], 1, N)) + sample_v(N)
         end
 
         # PF weight update based on measurement model (logarithms are used for numerical reasons).
-        log_w .= log_p_w(y[:, t] .- g(x_pf[:, :, t], repeat(u[:, t], 1, N)))
-        w[t, :] .= exp.(log_w .- maximum(log_w))
+        log_w .= log_pdf_w(y[:, t] .- g(x_pf[:, :, t], repeat(u[:, t], 1, N)))
+        max_log_w = maximum(log_w)
+        w[t, :] .= exp.(log_w .- max_log_w)
+
+        # Estimate log-likelihood.
+        log_likelihood += log(sum(w[t, :])) + max_log_w - log(N)
+
+        # Normalize weights.
         w[t, :] .= w[t, :] ./ sum(w[t, :])
     end
-    return x_pf, w, a
+    return x_pf, w, log_likelihood
 end
 
 
@@ -95,22 +74,20 @@ Run particle marginal Metropolis-Hastings (PMMH) with ancestor sampling to obtai
 - `N`: number of particles
 - `f_theta`: state transition function parametrized by theta; has inputs (theta, x, u)
 - `g_theta`: measurement function parametrized by theta; has inputs (theta, x, u)
-- `sample_v_theta`: function that returns a sample from the process noise distribution parametrized by theta; has input (theta)
-- `p_v_theta`: probability density function of the process noise parametrized by theta; has inputs (theta, v)
-- `log_p_w_theta`: function that returns the logarithm of the probability density function of the measurement noise parametrized by theta; has inputs (theta, w)
+- `sample_v_theta`: function that returns N samples from the process noise distribution parametrized by theta; has input (theta, N)
+- `pdf_v_theta`: probability density function of the process noise parametrized by theta; has inputs (theta, v)
+- `log_pdf_w_theta`: function that returns the logarithm of the probability density function of the measurement noise parametrized by theta; has inputs (theta, w)
 - `p_theta`: probability density function of theta (prior); has input (theta)
 - `propose_theta`: function that proposes new theta (proposal distribution); has input (theta)
 - `theta_init`: initial theta
 - `sample_x_init`: function that returns a sample from the distribution over initial states; has no inputs
 - `x_prim`: prespecified trajectory for the first iteration
 
-This function is based on the papers
+This function is based on the paper
 
-    Andrieu, Christophe, Arnaud Doucet, and Roman Holenstein. "Particle markov chain monte carlo methods." Journal of the Royal Statistical Society Series B: Statistical Methodology 72.3 (2010): 269-342.
-
-    F. Lindsten, T. B. Schön, and M. Jordan, “Ancestor sampling for particle Gibbs,” Advances in Neural Information Processing Systems, vol. 25, 2012.
+    Andrieu, Christophe, Arnaud Doucet, and Roman Holenstein. "Particle Markov chain Monte Carlo methods." Journal of the Royal Statistical Society Series B: Statistical Methodology 72.3 (2010): 269-342.
 """
-function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, p_v_theta::Function, log_p_w_theta::Function, p_theta::Function, propose_theta::Function, theta_init, sample_x_init::Function; x_prim=nothing)
+function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, pdf_v_theta::Function, log_pdf_w_theta::Function, p_theta::Function, propose_theta::Function, theta_init, sample_x_init::Function)
     # Total number of models
     K_total = K_b + 1 + (K - 1) * (k_d + 1)
 
@@ -141,12 +118,12 @@ function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Fun
         # Update model, i.e., update state transition and observation function and noise distributions.
         f(x, u) = f_theta(theta_prop, x, u)
         g(x, u) = g_theta(theta_prop, x, u)
-        sample_v() = sample_v_theta(theta)
-        p_v(v) = p_v_theta(theta, v)
-        log_p_w(w) = log_p_w_theta(theta, w)
+        sample_v(N) = sample_v_theta(theta, N)
+        pdf_v(v) = pdf_v_theta(theta, v)
+        log_pdf_w(w) = log_pdf_w_theta(theta, w)
 
         # Run particle smoother.
-        x_pf, w, a = particle_smoother(u, y, n_x, N, f, g, sample_v, log_p_w, x_prim, p_v)
+        x_pf, w, a = particle_smoother(u, y, n_x, N, f, g, sample_v, log_pdf_w, x_prim, pdf_v)
 
 
         # Sample state trajectory x_T:-1 to condition on.
