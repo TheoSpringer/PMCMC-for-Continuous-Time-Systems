@@ -1,202 +1,160 @@
 """
-    systematic_resampling(W, N)
+    particle_MMH(u, y, K, K_b, k_d, N, f_theta::Function, p_theta::Function, propose_theta::Function, theta_init, sample_x_init::Function, sample_process_noise, g::Function, R; x_prim=nothing)
 
-Sample `N` indices according to the weights `W`. 
-This function could be replaced by the function `wsample` from StatsBase.jl but is kept to minimize the differences between the Julia and the MATLAB implementations.
-
-# Arguments
-- `W`: vector containing the weights of the particles
-- `N`: number of indices to be sampled
-
-This function is based on the paper
-
-    A. Svensson and T. B. Schön, “A flexible state–space model for learning nonlinear dynamical systems,” Automatica, vol. 80, pp. 189–199, 2017.
-
-and the code provided in the supplementary material.
-"""
-function systematic_resampling(W, N)
-    # Normalize weights.
-    W = W / sum(W)
-
-    u = 1 / N * rand()
-    idx = Array{Int}(undef, N) # array containing the sampled indices
-    q = 0
-    n = 0
-    for i in 1:N
-        while q < u
-            n = n + 1
-            q = q + W[n]
-        end
-        idx[i] = n
-        u = u + 1 / N
-    end
-    return idx
-end
-
-"""
-    MNIW_sample(Phi, Psi, Sigma, V, Lambda_Q, ell_Q, T)
-
-Sample new model parameters ``\\{A, Q\\}`` from the conditional distribution ``p(A, Q | x_{T:-1})``, which is a matrix normal inverse Wishart (MNIW) distribution.
+Run a particle smoother with ancestor sampling to obtain samples ``\\{x_{T:-1}\\}^{[1:K]}`` from the conditional state distribution ``p(x_{T:-1} \\mid \\theta \\mathbb{D}=\\{u_{T:-1}, y_{T:-1}\\})``.
 
 # Arguments
-- `Phi`: statistic; see paper below for definition
-- `Psi`: statistic; see paper below for definition
-- `Sigma`: statistic; see paper below for definition
-- `V`: left covariance matrix of MN prior on ``A``
-- `Lambda_Q`: scale matrix of IW prior on ``Q``
-- `ell_Q`: degrees of freedom of IW prior on ``Q``
-- `T`: length of the training trajectory
-
-This function is based on the paper
-
-    A. Svensson and T. B. Schön, “A flexible state–space model for learning nonlinear dynamical systems,” Automatica, vol. 80, pp. 189–199, 2017.
-
-and the code provided in the supplementary material.
-"""
-function MNIW_sample(Phi, Psi, Sigma, V, Lambda_Q, ell_Q, T)
-    n_x = size(Phi, 1) # number of states
-
-    # Update statistics (only relevant if mean matrix M of MN prior on A is not zero).
-    Phibar = Phi # + (M/V)*M'
-    Psibar = Psi # +  M/V
-
-    # Calculate the components of the posterior MNIW distribution over model parameters.
-    Sigbar = Sigma + I / V
-    cov_M = Lambda_Q + Phibar - (Psibar / Sigbar) * Psibar' # scale matrix of posterior IW distribution
-    cov_M_sym = 0.5 * (cov_M + cov_M') # to ensure matrix is symmetric
-    post_mean = Psibar / Sigbar # mean matrix of posterior MN distribution
-    left_cov = I / Sigbar # left covariance matrix of posterior MN distribution
-    left_cov_sym = 0.5 * (left_cov + left_cov') # to ensure matrix is symmetric
-
-    # Sample Q from posterior IW distribution.
-    iw = InverseWishart(ell_Q + T * n_x, cov_M_sym)
-    Q = rand(iw)
-
-    # Sample A from posterior MN distribution.
-    mn = MatrixNormal(post_mean, Q, left_cov_sym)
-    A = rand(mn)
-
-    # Return model parameters.
-    return A, Q
-end
-
-"""
-    particle_Gibbs(u_training, y_training, K, K_b, k_d, N, phi::Function, Lambda_Q, ell_Q, Q_init, V, A_init, x_init_dist, g, R; x_prim=nothing)
-
-Run particle Gibbs sampler with ancestor sampling to obtain samples ``\\{A, Q, x_{T:-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(A, Q, x_{T:-1} \\mid \\mathbb{D}=\\{u_{T:-1}, y_{T:-1}\\})``.
-
-# Arguments
-- `u_training`: training input trajectory
-- `y_training`: training output trajectory
-- `K`: number of models/scenarios to be sampled
-- `K_b`: length of the burn in period
-- `k_d`: number of models/scenarios to be skipped to decrease correlation (thinning)
+- `u`: training input trajectory
+- `y`: training output trajectory
+- `n_x`: number of states
 - `N`: number of particles
-- `phi`: basis functions
-- `Lambda_Q`: scale matrix of IW prior on ``Q``
-- `ell_Q`: degrees of freedom of IW prior on ``Q``
-- `Q_init`: initial value of ``Q``
-- `V`: left covariance matrix of MN prior on ``A``
-- `A_init`: initial value of ``A``
-- `x_init_dist`: distribution of the initial state
-- `g`: observation function
-- `R`: variance of zero-mean Gaussian measurement noise
+- `f`: state transition function; has inputs (x, u)
+- `g`: measurement function; has inputs (x, u)
+- `sample_v`: function that returns a sample from the process noise distribution; has no inputs
+- `p_v_theta`: probability density function of the process noise parametrized by theta; has inputs (theta, v)
+- `log_p_w`: function that returns the logarithm of the probability density function of the measurement noise; has input (w)
+- `sample_x_init`: function that returns a sample from the distribution over initial states; has no inputs
 - `x_prim`: prespecified trajectory for the first iteration
 
 This function is based on the papers
 
-    A. Svensson and T. B. Schön, “A flexible state–space model for learning nonlinear dynamical systems,” Automatica, vol. 80, pp. 189–199, 2017.
+    Andrieu, Christophe, Arnaud Doucet, and Roman Holenstein. "Particle markov chain monte carlo methods." Journal of the Royal Statistical Society Series B: Statistical Methodology 72.3 (2010): 269-342.
 
     F. Lindsten, T. B. Schön, and M. Jordan, “Ancestor sampling for particle Gibbs,” Advances in Neural Information Processing Systems, vol. 25, 2012.
-
-and the code provided in the supplementary material.
 """
-function particle_Gibbs(u_training, y_training, K, K_b, k_d, N, phi::Function, Lambda_Q, ell_Q, Q_init, V, A_init, x_init_dist, g, R; x_prim=nothing)
-    # Total number of models
-    K_total = K_b + 1 + (K - 1) * (k_d + 1)
-
-    # Get number of states, etc.
-    n_x = size(A_init, 1)
-    n_u = size(u_training, 1)
-    n_y = size(y_training, 1)
-    n_phi = size(A_init,2)
-    T = size(y_training, 2)
-
-    # Define the prespecified trajectory for the first iteration if not provided.
-    if x_prim === nothing
-        x_prim = zeros(n_x, T)
-    end
-
+function particle_smoother(u, y, n_x, N, f::Function, g::Function, sample_v::Function, log_p_w::Function, x_prim=nothing, p_v=nothing)
     # Initialize and pre-allocate.
-    PG_samples = Vector{PG_sample}(undef, K)
-    for k in 1:K
-        PG_samples[k] = PG_sample(Array{Float64}(undef, size(A_init)), Array{Float64}(undef, size(Q_init)), Array{Float64}(undef, N), Array{Float64}(undef, n_x, N), Array{Float64}(undef, n_u))
-    end
-    current_sample = 1
-    A = A_init
-    Q = Q_init
+    T = size(y, 2)
     w = Array{Float64}(undef, T, N)
     x_pf = Array{Float64}(undef, n_x, N, T)
     a = Array{Int64}(undef, T, N)
     waN = Array{Float64}(undef, N)
     log_w = Array{Float64}(undef, N)
-    zeta = Array{Float64}(undef, n_x, T - 1)
-    z = Array{Float64}(undef, n_phi, T - 1)
-    Phi = Array{Float64}(undef, n_x, n_x)
-    Psi = Array{Float64}(undef, n_x, n_phi)
-    Sigma = Array{Float64}(undef, n_phi, n_phi)
 
-    # Time PGS sampling.
-    learning_timer = time()
-
-    println("### Started learning algorithm")
-
-    for k in 1:K_total
-        # Get current model.
-        f(x, u) = A * phi(x, u)
-        mvn_v = MvNormal(zeros(n_x), Q) # process noise distribution
-
-        # Initialize particle filter with ancestor sampling.
+    if x_prim === nothing
+        for n in 1:N
+            x_pf[:, n, 1] .= sample_x_init()
+        end
+        use_AS = false
+    else
+        if p_v === nothing
+            error("If x_prim is specified, i.e., ancestor sampling is used, p_v must be provided.")
+        end
         x_pf[:, end, :] .= x_prim
-
-        # Sample initial states.
         for n in 1:N-1
-            x_pf[:, n, 1] .= rand(x_init_dist)
+            x_pf[:, n, 1] .= sample_x_init()
+        end
+        use_AS = true
+    end
+
+    # Particle filter (resampling, propagation, and ancestor sampling)
+    for t in 1:T
+        if t >= 2
+            if use_AS # Run the conditional PF with ancestor sampling.
+                # Resample particles (= sample ancestors).
+                a[t, 1:N-1] .= sample(1:N, Weights(w[t-1, :]), N - 1)
+
+                # Propagate resampled particles.
+                x_pf[:, 1:N-1, t] .= f(x_pf[:, a[t, 1:N-1], t-1], repeat(u[:, t-1], 1, N - 1)) + sample_v()
+
+                # Sample ancestors of prespecified trajectory x_prim.
+                waN .= w[t-1, :] .* p_v(x_pf[:, N, t] .- f(x_pf[:, :, t-1], repeat(u[:, t-1], 1, N)))
+                waN .= waN ./ sum(waN)
+                a[t, N] = sample(1:N, Weights(waN))
+
+            else # Run a standard PF.
+                # Resample particles.
+                a[t, :] .= sample(1:N, Weights(w[t-1, :]), N)
+
+                # Propagate resampled particles.
+                x_pf[:, :, t] .= f(x_pf[:, a[t, :], t-1], repeat(u[:, t-1], 1, N)) + sample_v()
+            end
         end
 
-        # Particle filter (resampling, propagation, and ancestor sampling)
-        for t in 1:T
-            if t >= 2
-                if k > 1 # Run the conditional PF with ancestor sampling.
-                    # Resample particles (= sample ancestors).
-                    a[t, 1:N-1] .= systematic_resampling(w[t-1, :], N - 1)
+        # PF weight update based on measurement model (logarithms are used for numerical reasons).
+        log_w .= log_p_w(y[:, t] .- g(x_pf[:, :, t], repeat(u[:, t], 1, N)))
+        w[t, :] .= exp.(log_w .- maximum(log_w))
+        w[t, :] .= w[t, :] ./ sum(w[t, :])
+    end
+    return x_pf, w, a
+end
 
-                    # Propagate resampled particles.
-                    x_pf[:, 1:N-1, t] .= f(x_pf[:, a[t, 1:N-1], t-1], repeat(u_training[:, t-1], 1, N - 1)) + rand(mvn_v, N - 1)
 
-                    # Sample ancestors of prespecified trajectory x_prim.
-                    mvn_x_prim = MvNormal(x_pf[:, N, t], Q)
-                    waN .= w[t-1, :] .* pdf(mvn_x_prim, f(x_pf[:, :, t-1], repeat(u_training[:, t-1], 1, N)))
-                    waN .= waN ./ sum(waN)
-                    a[t, N] = systematic_resampling(waN, 1)[1]
+"""
+    particle_MMH(u, y, K, K_b, k_d, N, f_theta::Function, p_theta::Function, propose_theta::Function, theta_init, sample_x_init::Function, sample_process_noise, g::Function, R; x_prim=nothing)
 
-                else # Run a standard PF on the first iteration.
-                    # Resample particles.
-                    a[t, :] .= systematic_resampling(w[t-1, :], N)
+Run particle marginal Metropolis-Hastings (PMMH) with ancestor sampling to obtain samples ``\\{\\theta, x_{T:-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(\\theta, x_{T:-1} \\mid \\mathbb{D}=\\{u_{T:-1}, y_{T:-1}\\})``.
 
-                    # Propagate resampled particles.
-                    x_pf[:, :, t] .= f(x_pf[:, a[t, :], t-1], repeat(u_training[:, t-1], 1, N)) + rand(mvn_v, N)
-                end
-            end
+# Arguments
+- `u`: training input trajectory
+- `y`: training output trajectory
+- `n_x`: number of states
+- `K`: number of models/scenarios to be sampled
+- `K_b`: length of the burn in period
+- `k_d`: number of models/scenarios to be skipped to decrease correlation (thinning)
+- `N`: number of particles
+- `f_theta`: state transition function parametrized by theta; has inputs (theta, x, u)
+- `g_theta`: measurement function parametrized by theta; has inputs (theta, x, u)
+- `sample_v_theta`: function that returns a sample from the process noise distribution parametrized by theta; has input (theta)
+- `p_v_theta`: probability density function of the process noise parametrized by theta; has inputs (theta, v)
+- `log_p_w_theta`: function that returns the logarithm of the probability density function of the measurement noise parametrized by theta; has inputs (theta, w)
+- `p_theta`: probability density function of theta (prior); has input (theta)
+- `propose_theta`: function that proposes new theta (proposal distribution); has input (theta)
+- `theta_init`: initial theta
+- `sample_x_init`: function that returns a sample from the distribution over initial states; has no inputs
+- `x_prim`: prespecified trajectory for the first iteration
 
-            # PF weight update based on measurement model (logarithms are used for numerical reasons).
-            if n_y == 1 # scalar output
-                log_w .= -(g(x_pf[:, :, t], repeat(u_training[:, t], 1, N))[1, :] .- y_training[1, t]) .^ 2 / 2 / R # logarithm of normal distribution pdf (ignoring scaling factors)
-            else # vector-valued output
-                log_w .= -sum((y_training[:, t] .- g(x_pf[:, :, t], repeat(u_training[:, t], 1, N))) .* (R \ (y_training[:, t] .- g(x_pf[:, :, t], repeat(u_training[:, t], 1, N)))), dims=1) / 2 # logarithm of multivariate normal distribution pdf (ignoring scaling factors)
-            end
-            w[t, :] .= exp.(log_w .- maximum(log_w))
-            w[t, :] .= w[t, :] ./ sum(w[t, :])
+This function is based on the papers
+
+    Andrieu, Christophe, Arnaud Doucet, and Roman Holenstein. "Particle markov chain monte carlo methods." Journal of the Royal Statistical Society Series B: Statistical Methodology 72.3 (2010): 269-342.
+
+    F. Lindsten, T. B. Schön, and M. Jordan, “Ancestor sampling for particle Gibbs,” Advances in Neural Information Processing Systems, vol. 25, 2012.
+"""
+function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, p_v_theta::Function, log_p_w_theta::Function, p_theta::Function, propose_theta::Function, theta_init, sample_x_init::Function; x_prim=nothing)
+    # Total number of models
+    K_total = K_b + 1 + (K - 1) * (k_d + 1)
+
+    # Get number of inputs, etc.
+    n_u = size(u, 1)
+    T = size(y, 2)
+
+    # Initialize and pre-allocate.
+    PMMH_samples = Vector{PG_sample}(undef, K)
+    for k in 1:K
+        PMMH_samples[k] = PG_sample(Array{Float64}(undef, size(theta_init)), Array{Float64}(undef, N), Array{Float64}(undef, n_x, N), Array{Float64}(undef, n_u))
+    end
+    accepted_samples = 0
+    theta = theta_init
+
+    # Time PMMH sampler.
+    learning_timer = time()
+
+    println("### Started PMMH sampling")
+
+    while accepted_samples < K_total
+        # Propose new parameters.
+        theta_prop = propose_theta(theta)
+        if !(p_theta(theta_prop) > 0)
+            continue
+        end
+
+        # Update model, i.e., update state transition and observation function and noise distributions.
+        f(x, u) = f_theta(theta_prop, x, u)
+        g(x, u) = g_theta(theta_prop, x, u)
+        sample_v() = sample_v_theta(theta)
+        p_v(v) = p_v_theta(theta, v)
+        log_p_w(w) = log_p_w_theta(theta, w)
+
+        # Run particle smoother.
+        x_pf, w, a = particle_smoother(u, y, n_x, N, f, g, sample_v, log_p_w, x_prim, p_v)
+
+
+        # Sample state trajectory x_T:-1 to condition on.
+        star = sample(1:N, Weights(w[end, :]))
+        x_prim[:, T] .= x_pf[:, star, T]
+        for t in T-1:-1:1
+            star = a[t+1, star]
+            x_prim[:, t] .= x_pf[:, star, t]
         end
 
         # Use sample if the burn-in period is reached and the sample is not removed by thinning.
@@ -205,29 +163,23 @@ function particle_Gibbs(u_training, y_training, K, K_b, k_d, N, phi::Function, L
             PG_samples[current_sample].Q .= Q
             PG_samples[current_sample].w_m1 .= w[end, :]
             PG_samples[current_sample].x_m1 .= x_pf[:, :, end]
-            PG_samples[current_sample].u_m1 .= u_training[:, end]
+            PG_samples[current_sample].u_m1 .= u[:, end]
             current_sample += 1
-        end
-
-        # Sample state trajectory x_T:-1 to condition on.
-        star = systematic_resampling(w[end, :], 1)[1]
-        x_prim[:, T] .= x_pf[:, star, T]
-        for t in T-1:-1:1
-            star = a[t+1, star]
-            x_prim[:, t] .= x_pf[:, star, t]
         end
 
         # Sample new model parameters conditional on sampled trajectory, i.e., sample from p(A, Q | x_T:-1).
         zeta .= x_prim[:, 2:T]
-        z .= phi(x_prim[:, 1:T-1], u_training[:, 1:T-1])
+        z .= phi(x_prim[:, 1:T-1], u[:, 1:T-1])
         Phi .= zeta * zeta' # statistic; see paper "A flexible state-space model for learning nonlinear dynamical systems"
         Psi .= zeta * z' # statistic
         Sigma .= z * z' # statistic
         A, Q = MNIW_sample(Phi, Psi, Sigma, V, Lambda_Q, ell_Q, T - 1) # sample new model parameters
 
         # Print progress.
-        @printf("Iteration %i/%i\n", k, K_total)
+        @printf("Accepted sample %i/%i\n", accepted_samples, K_total)
     end
+
+
 
     # Print runtime.
     time_learning = time() - learning_timer
@@ -281,7 +233,7 @@ function test_prediction(PG_samples::Vector{PG_sample}, phi::Function, g, R, k_n
             y_loop = Array{Float64}(undef, n_y, T_test)
 
             # Sample initial state.
-            star = systematic_resampling(PG_samples[k].w_m1, 1)[1]
+            star = sample(1:length(PG_samples[k].w_m1), Weights(PG_samples[k].w_m1))
             x_m1 = PG_samples[k].x_m1[:, star]
             x_loop[:, 1] .= f(x_m1, PG_samples[k].u_m1) + rand(mvn_v)
 
@@ -403,7 +355,7 @@ function plot_autocorrelation(PG_samples::Vector{PG_sample}; max_lag=0)
     signal_matrix = Array{Float64}(undef, K, number_of_variables)
     for i in 1:K
         # Sample initial state.
-        star = systematic_resampling(PG_samples[i].w_m1, 1)
+        star = sample(1:length(PG_samples[i].w_m1), Weights(PG_samples[i].w_m1))
         x_m1 = PG_samples[i].x_m1[:, star]
         signal_matrix[i, :] .= [vec(PG_samples[i].A); vec(PG_samples[i].Q); vec(x_m1)]
     end
