@@ -1,7 +1,7 @@
 """
     particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Function, log_pdf_w::Function, sample_x_init::Function)
 
-Run a particle filter with ancestor sampling to approximate the log-marginal likelihood ``\\log p(y_{0:t} \\mid \\theta, \\{u_{0:t}\\})``.
+Run a particle filter with ancestor sampling to approximate the log-marginal likelihood ``\\log p(y_{0:t_0-1} \\mid \\theta, \\{u_{0:t_0-1}\\})``.
 
 # Arguments
 - `u`: training input trajectory
@@ -48,21 +48,20 @@ function particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Funct
         log_w .= log_pdf_w(y[:, t] .- g(x_pf[:, :, t], repeat(u[:, t], 1, N)))
         max_log_w = maximum(log_w)
         w[t, :] .= exp.(log_w .- max_log_w)
+        sum_w = sum(w[t, :])
+        w[t, :] .= w[t, :] ./ sum_w
 
         # Estimate log-likelihood.
-        log_likelihood += log(sum(w[t, :])) + max_log_w - log(N)
-
-        # Normalize weights.
-        w[t, :] .= w[t, :] ./ sum(w[t, :])
+        log_likelihood += log(sum_w) + max_log_w - log(N)
     end
     return x_pf, w, log_likelihood
 end
 
 
 """
-    particle_MMH(u, y, K, K_b, k_d, N, f_theta::Function, p_theta::Function, propose_theta::Function, theta_init, sample_x_init::Function, sample_process_noise, g::Function, R; x_prim=nothing)
+    particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, pdf_theta::Function, propose_theta::Function, theta_init, sample_x_init::Function)
 
-Run particle marginal Metropolis-Hastings (PMMH) with ancestor sampling to obtain samples ``\\{\\theta, x_{T:-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(\\theta, x_{T:-1} \\mid \\mathbb{D}=\\{u_{T:-1}, y_{T:-1}\\})``.
+Run particle marginal Metropolis-Hastings (PMMH) with ancestor sampling to obtain samples ``\\{\\theta, x_{0:t_0-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(\\theta, x_{0:t_0-1} \\mid \\mathbb{D}=\\{u_{0:t_0-1}, y_{0:t_0-1}\\})``.
 
 # Arguments
 - `u`: training input trajectory
@@ -75,10 +74,10 @@ Run particle marginal Metropolis-Hastings (PMMH) with ancestor sampling to obtai
 - `f_theta`: state transition function parametrized by theta; has inputs (theta, x, u)
 - `g_theta`: measurement function parametrized by theta; has inputs (theta, x, u)
 - `sample_v_theta`: function that returns N samples from the process noise distribution parametrized by theta; has input (theta, N)
-- `pdf_v_theta`: probability density function of the process noise parametrized by theta; has inputs (theta, v)
 - `log_pdf_w_theta`: function that returns the logarithm of the probability density function of the measurement noise parametrized by theta; has inputs (theta, w)
-- `p_theta`: probability density function of theta (prior); has input (theta)
+- `pdf_theta`: probability density function of theta (prior); has input (theta)
 - `propose_theta`: function that proposes new theta (proposal distribution); has input (theta)
+- `proposal_pdf_ratio`: function that computes the ratio of proposal densities; has input arguments (theta_accepted, theta_prop)
 - `theta_init`: initial theta
 - `sample_x_init`: function that returns a sample from the distribution over initial states; has no inputs
 - `x_prim`: prespecified trajectory for the first iteration
@@ -87,109 +86,111 @@ This function is based on the paper
 
     Andrieu, Christophe, Arnaud Doucet, and Roman Holenstein. "Particle Markov chain Monte Carlo methods." Journal of the Royal Statistical Society Series B: Statistical Methodology 72.3 (2010): 269-342.
 """
-function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, pdf_v_theta::Function, log_pdf_w_theta::Function, p_theta::Function, propose_theta::Function, theta_init, sample_x_init::Function)
+function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, pdf_theta::Function, propose_theta::Function, theta_init, sample_x_init::Function)
     # Total number of models
-    K_total = K_b + 1 + (K - 1) * (k_d + 1)
+    K_total = 1 + K_b + 1 + (K - 1) * (k_d + 1)
 
     # Get number of inputs, etc.
     n_u = size(u, 1)
+    n_theta = length(theta_init)
     T = size(y, 2)
 
     # Initialize and pre-allocate.
-    PMMH_samples = Vector{PG_sample}(undef, K)
+    PMMH_samples = Vector{PMMH_sample}(undef, K)
     for k in 1:K
-        PMMH_samples[k] = PG_sample(Array{Float64}(undef, size(theta_init)), Array{Float64}(undef, N), Array{Float64}(undef, n_x, N), Array{Float64}(undef, n_u))
+        PMMH_samples[k] = PMMH_sample(Array{Float64}(undef, size(theta_init)), Array{Float64}(undef, N), Array{Float64}(undef, n_x, N), Array{Float64}(undef, n_u))
     end
-    accepted_samples = 0
-    theta = theta_init
+    accepted_samples = 1
+    current_sample = 1
+    theta = Array{Float64}(undef, n_theta, K_total)
+    log_likelihood = Array{Float64}(undef, K_total)
 
     # Time PMMH sampler.
     learning_timer = time()
 
     println("### Started PMMH sampling")
 
-    while accepted_samples < K_total
+    # Get likelihood of initial theta.
+    f(x, u) = f_theta(theta_init, x, u)
+    g(x, u) = g_theta(theta_init, x, u)
+    sample_v(N) = sample_v_theta(theta_init, N)
+    log_pdf_w(w) = log_pdf_w_theta(theta_init, w)
+    log_likelihood[1] .= particle_filter(u, y, n_x, N, f, g, sample_v, log_pdf_w, sample_x_init)[3]
+    theta[:, 1] .= theta_init
+
+    while accepted_samples <= K_total
         # Propose new parameters.
-        theta_prop = propose_theta(theta)
-        if !(p_theta(theta_prop) > 0)
+        theta_prop = propose_theta(theta[:, accepted_samples])
+        p_theta_prop = pdf_theta(theta_prop)
+        if !(p_theta_prop > 0)
             continue
         end
 
         # Update model, i.e., update state transition and observation function and noise distributions.
         f(x, u) = f_theta(theta_prop, x, u)
         g(x, u) = g_theta(theta_prop, x, u)
-        sample_v(N) = sample_v_theta(theta, N)
-        pdf_v(v) = pdf_v_theta(theta, v)
-        log_pdf_w(w) = log_pdf_w_theta(theta, w)
+        sample_v(N) = sample_v_theta(theta_prop, N)
+        log_pdf_w(w) = log_pdf_w_theta(theta_prop, w)
 
-        # Run particle smoother.
-        x_pf, w, a = particle_smoother(u, y, n_x, N, f, g, sample_v, log_pdf_w, x_prim, pdf_v)
+        # Run particle filter.
+        x_pf, w, log_likelihood_prop = particle_filter(u, y, n_x, N, f, g, sample_v, log_pdf_w, sample_x_init)
 
+        # Compute acceptance probability.
+        acceptance_ratio = exp(log_likelihood_prop - log_likelihood[accepted_samples]) * (p_theta_prop / pdf_theta(theta[:, accepted_samples])) * proposal_pdf_ratio(theta[:, accepted_samples], theta_prop)
 
-        # Sample state trajectory x_T:-1 to condition on.
-        star = sample(1:N, Weights(w[end, :]))
-        x_prim[:, T] .= x_pf[:, star, T]
-        for t in T-1:-1:1
-            star = a[t+1, star]
-            x_prim[:, t] .= x_pf[:, star, t]
+        # Accept or reject the proposal.
+        if rand() < acceptance_ratio
+            theta[:, accepted_samples+1] .= theta_prop
+            log_likelihood[accepted_samples+1] .= log_likelihood_prop
+            accepted_samples += 1
+
+            # Use sample if the burn-in period is reached and the sample is not removed by thinning.
+            if K_b + 1 < accepted_samples && (mod(accepted_samples - (K_b + 2), k_d + 1) == 0)
+                PMMH_samples[current_sample].theta .= theta_prop
+                PMMH_samples[current_sample].x_m1 .= x_pf[:, :, end]
+                PMMH_samples[current_sample].w_m1 .= w[end, :]
+                PMMH_samples[current_sample].u_m1 .= u[:, end]
+                current_sample += 1
+            end
+
+            # Print progress.
+            @printf("\e[32m%i/%i samples accepted\e[0m\n", accepted_samples, K_total)
+        else
+            # Print progress.
+            @printf("\e[31m%i/%i samples accepted\e[0m\n", accepted_samples, K_total)
         end
-
-        # Use sample if the burn-in period is reached and the sample is not removed by thinning.
-        if K_b < k && (mod(k - (K_b + 1), k_d + 1) == 0)
-            PG_samples[current_sample].A .= A
-            PG_samples[current_sample].Q .= Q
-            PG_samples[current_sample].w_m1 .= w[end, :]
-            PG_samples[current_sample].x_m1 .= x_pf[:, :, end]
-            PG_samples[current_sample].u_m1 .= u[:, end]
-            current_sample += 1
-        end
-
-        # Sample new model parameters conditional on sampled trajectory, i.e., sample from p(A, Q | x_T:-1).
-        zeta .= x_prim[:, 2:T]
-        z .= phi(x_prim[:, 1:T-1], u[:, 1:T-1])
-        Phi .= zeta * zeta' # statistic; see paper "A flexible state-space model for learning nonlinear dynamical systems"
-        Psi .= zeta * z' # statistic
-        Sigma .= z * z' # statistic
-        A, Q = MNIW_sample(Phi, Psi, Sigma, V, Lambda_Q, ell_Q, T - 1) # sample new model parameters
-
-        # Print progress.
-        @printf("Accepted sample %i/%i\n", accepted_samples, K_total)
     end
-
-
 
     # Print runtime.
     time_learning = time() - learning_timer
-    @printf("### Learning complete\nRuntime: %.2f s\n", time_learning)
+    @printf("### PMMH sampling complete\nRuntime: %.2f s\n", time_learning)
 
-    return PG_samples
+    return PMMH_samples
 end
 
 """
-    test_prediction(PG_samples::Vector{PG_sample}, phi::Function, g, R, k_n, u_test, y_test)
+    test_prediction(PMMH_samples::Vector{PMMH_sample}, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, u_test, y_test)
 
-Simulate the PGS samples forward in time and compare the predictions to the test data.
+Simulate the PMMH samples forward in time and compare the predictions to the test data.
 
 # Arguments
-- `PG_samples`: PG samples
-- `phi`: basis functions
-- `g`: observation function
-- `R`: variance of zero-mean Gaussian measurement noise
+- `PMMH_samples`: PMMH samples
+- `n_x`: number of states
+- `f_theta`: state transition function parametrized by theta; has inputs (theta, x, u)
+- `g_theta`: measurement function parametrized by theta; has inputs (theta, x, u)
+- `sample_v_theta`: function that returns N samples from the process noise distribution parametrized by theta; has input (theta, N)
+- `sample_w_theta`: function that returns N samples from the measurement noise distribution parametrized by theta; has input (theta, N)
 - `k_n`: each model is simulated ``k_n`` times
 - `u_test`: test input
 - `y_test`: test output
 """
-function test_prediction(PG_samples::Vector{PG_sample}, phi::Function, g, R, k_n, u_test, y_test)
+function test_prediction(PMMH_samples::Vector{PMMH_sample}, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, k_n, u_test, y_test)
     println("### Testing model")
 
     # Get number of models, etc.
-    K = size(PG_samples, 1)
-    n_x = size(PG_samples[1].A, 1)
+    K = size(PMMH_samples, 1)
     n_y = size(y_test, 1)
     T_test = size(y_test, 2)
-
-    # Measurement noise distribution
-    mvn_e = MvNormal(zeros(n_y), R)
 
     # Pre-allocate.
     x_test_sim = Array{Float64}(undef, n_x, T_test + 1, K, k_n)
@@ -198,10 +199,10 @@ function test_prediction(PG_samples::Vector{PG_sample}, phi::Function, g, R, k_n
     # Simulate models forward.
     Threads.@threads for k in 1:K
         # Get current model.
-        A = PG_samples[k].A
-        Q = PG_samples[k].Q
-        f(x, u) = A * phi(x, u)
-        mvn_v = MvNormal(zeros(n_x), Q) # process noise distribution
+        f(x, u) = f_theta(PMMH_samples[k].theta, x, u)
+        g(x, u) = g_theta(PMMH_samples[k].theta, x, u)
+        sample_v(N) = sample_v_theta(PMMH_samples[k].theta, N)
+        sample_w(N) = sample_w_theta(PMMH_samples[k].theta, N)
 
         # Simulate each model k_n times.
         for kn in 1:k_n
@@ -210,16 +211,16 @@ function test_prediction(PG_samples::Vector{PG_sample}, phi::Function, g, R, k_n
             y_loop = Array{Float64}(undef, n_y, T_test)
 
             # Sample initial state.
-            star = sample(1:length(PG_samples[k].w_m1), Weights(PG_samples[k].w_m1))
-            x_m1 = PG_samples[k].x_m1[:, star]
-            x_loop[:, 1] .= f(x_m1, PG_samples[k].u_m1) + rand(mvn_v)
+            star = sample(1:length(PMMH_samples[k].w_m1), Weights(PMMH_samples[k].w_m1))
+            x_m1 = PMMH_samples[k].x_m1[:, star]
+            x_loop[:, 1] .= f(x_m1, PMMH_samples[k].u_m1) + sample_v(1)
 
             # Simulate model forward.
             for t in 1:T_test
                 if t >= 2
-                    x_loop[:, t] .= f(x_loop[:, t-1], u_test[:, t-1]) + rand(mvn_v)
+                    x_loop[:, t] .= f(x_loop[:, t-1], u_test[:, t-1]) + sample_v(1)
                 end
-                y_loop[:, t] .= g(x_loop[:, t], u_test[:, t]) + rand(mvn_e)
+                y_loop[:, t] .= g(x_loop[:, t], u_test[:, t]) + sample_w(1)
             end
 
             # Store trajectory.
@@ -309,20 +310,20 @@ function plot_predictions(y_pred, y_test; plot_percentiles=false, y_min=nothing,
 end
 
 """
-    plot_autocorrelation(PG_samples::Vector{PG_sample}; max_lag=0)
+    plot_autocorrelation(PMMH_samples::Vector{PMMH_sample}; max_lag=0)
 
-Plot the autocorrelation function (ACF) of the PG samples. This might be helpful when adjusting the thinning parameter ``k_d``.
+Plot the autocorrelation function (ACF) of the PMMH samples. This might be helpful when adjusting the thinning parameter ``k_d``.
 
 # Arguments
-- `PG_samples`: PG samples
+- `PMMH_samples`: PMMH samples
 - `max_lag`: maximum lag at which to calculate the ACF
 """
-function plot_autocorrelation(PG_samples::Vector{PG_sample}; max_lag=0)
+function plot_autocorrelation(PMMH_samples::Vector{PMMH_sample}; max_lag=0)
     # Get number of models.
-    K = size(PG_samples, 1)
+    K = size(PMMH_samples, 1)
 
     # Get number of parameters of the PG samples.
-    number_of_variables = length(PG_samples[1].A) + length(PG_samples[1].Q) + size(PG_samples[1].x_m1, 1)
+    number_of_variables = length(PMMH_samples[1].theta) + size(PMMH_samples[1].x_m1, 1)
 
     if max_lag == 0
         max_lag = K - 1
@@ -332,9 +333,9 @@ function plot_autocorrelation(PG_samples::Vector{PG_sample}; max_lag=0)
     signal_matrix = Array{Float64}(undef, K, number_of_variables)
     for i in 1:K
         # Sample initial state.
-        star = sample(1:length(PG_samples[i].w_m1), Weights(PG_samples[i].w_m1))
-        x_m1 = PG_samples[i].x_m1[:, star]
-        signal_matrix[i, :] .= [vec(PG_samples[i].A); vec(PG_samples[i].Q); vec(x_m1)]
+        star = sample(1:length(PMMH_samples[i].w_m1), Weights(PMMH_samples[i].w_m1))
+        x_m1 = PMMH_samples[i].x_m1[:, star]
+        signal_matrix[i, :] .= [PMMH_samples[i].theta; vec(x_m1)]
     end
 
     # Calculate the autocorrelation.
@@ -343,20 +344,16 @@ function plot_autocorrelation(PG_samples::Vector{PG_sample}; max_lag=0)
     # Plot the ACF.
     p = plot(yticks=-1:0.1:1)
     for i in 1:number_of_variables
-        # Plot the ACF of the elements of A.
+
         if i == 1
-            plot!(Array(0:max_lag), autocorrelation[:, i], lc=:red, lw=2, label="A")
-        elseif 1 < i <= length(PG_samples[1].A)
+            # Plot the ACF of the elements of theta.
+            plot!(Array(0:max_lag), autocorrelation[:, i], lc=:red, lw=2, label="theta")
+        elseif 1 < i <= length(PMMH_samples[1].theta)
             plot!(Array(0:max_lag), autocorrelation[:, i], lc=:red, lw=2, label="")
-            # Plot the ACF of the elements of Q.  
-        elseif i == length(PG_samples[1].A) + 1
-            plot!(Array(0:max_lag), autocorrelation[:, i], lc=:blue, lw=2, label="Q")
-        elseif (length(PG_samples[1].A) + 1 < i) && (i <= length(PG_samples[1].A) + length(PG_samples[1].Q))
-            plot!(Array(0:max_lag), autocorrelation[:, i], lc=:blue, lw=2, label="")
+        elseif i == length(PMMH_samples[1].theta) + 1
             # Plot the ACF of the elements of x_t-1.
-        elseif i == length(PG_samples[1].A) + length(PG_samples[1].Q) + 1
             plot!(Array(0:max_lag), autocorrelation[:, i], lc=:green, lw=2, label="x")
-        elseif length(PG_samples[1].A) + length(PG_samples[1].Q) + 1 < i
+        elseif length(PMMH_samples[1].theta) + 1 < i
             plot!(Array(0:max_lag), autocorrelation[:, i], lc=:green, lw=2, label="")
         end
     end
