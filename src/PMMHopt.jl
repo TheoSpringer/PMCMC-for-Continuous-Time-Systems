@@ -1,6 +1,10 @@
 "Core module of the PMMHopt algorithm. Contains all necessary functions such as the particle marginal Metropolis Hastings sampler and scenario optimization."
 module PMMHopt
-
+using LinearAlgebra
+using Plots
+using Printf
+using JuMP
+using Ipopt
 export PMMH_sample, particle_MMH, particle_filter, test_prediction, plot_predictions, plot_autocorrelation, epsilon, solve_PMMH_OCP, solve_PMMH_OCP_greedy_guarantees
 
 # Struct for the samples of the PMMH algorithm

@@ -111,10 +111,10 @@ function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Fun
     println("### Started PMMH sampling")
 
     # Get likelihood of initial theta.
-    f(x, u) = f_theta(theta_init, x, u)
-    g(x, u) = g_theta(theta_init, x, u)
-    sample_v(N) = sample_v_theta(theta_init, N)
-    log_pdf_w(w) = log_pdf_w_theta(theta_init, w)
+    f(x, u) .= f_theta(theta_init, x, u)
+    g(x, u) .= g_theta(theta_init, x, u)
+    sample_v(N) .= sample_v_theta(theta_init, N)
+    log_pdf_w(w) .= log_pdf_w_theta(theta_init, w)
     log_likelihood[1] .= particle_filter(u, y, n_x, N, f, g, sample_v, log_pdf_w, sample_x_init)[3]
     theta[:, 1] .= theta_init
 
