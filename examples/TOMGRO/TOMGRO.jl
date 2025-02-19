@@ -16,7 +16,7 @@ module TOMGRO
 export reset, step!, plot_history
 
 """
-# Model Parameters
+## Model Parameters
 Constants used in the tomato growth model.
 
 - `Nm`: maximum rate of node appearance (at optimal temperatures)
@@ -48,7 +48,7 @@ const v = 0.24
 const LAImax = 6.0
 
 """
-# Initial State
+## Initial State
 Initial values for model state variables.
 
 - `N`: number of nodes on mainstem
@@ -64,7 +64,7 @@ const Wm_init = 0.0
 const Wf_init = 0.0
 
 """
-# TOMGRO State
+## TOMGRO State
 
 Holds the state of the TOMGRO simulation, including historical data.
 
