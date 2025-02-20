@@ -12,12 +12,13 @@ It models various aspects of plant development, including node formation, leaf a
 - Heuvelink (1994) *Dry-matter partitioning in a tomato crop: Comparison of two simulation models*
 """
 module TOMGRO
+using Plots
 
 export reset, step!, plot_history
 
 """
 ## Model Parameters
-Constants used in the tomato growth model.
+Holds the parameters of the TOMGRO simulation.
 
 - `Nm`: maximum rate of node appearance (at optimal temperatures)
 - `Nb`: coefficient in expolinear equation, projection of linear segment of LAI vs N to horizontal axis
@@ -33,19 +34,44 @@ Constants used in the tomato growth model.
 - `v`: transition coefficient governing the shift between vegetative and reproductive growth phases
 - `LAImax`: maximum leaf area index
 """
-const Nm = 0.495
-const Nb = 13
-const sigma = 0.041
-const beta = 0.22
-const Vmax = 6
-const Qe = 0.09
-const tau = 0.12
-const K = 0.61
-const CE = 0.74
-const T_CRIT = 24
-const alpha_F = 0.95
-const v = 0.24
-const LAImax = 6.0
+mutable struct TOMGRO_parameters
+    Nm::Float64
+    Nb::Int
+    sigma::Float64
+    beta::Float64
+    Vmax::Float64
+    Qe::Float64
+    tau::Float64
+    K::Float64
+    CE::Float64
+    T_CRIT::Float64
+    alpha_F::Float64
+    v::Float64
+    LAImax::Float64
+end
+
+"""
+    default_parameters()
+
+Returns the default TOMGRO model parameters.
+"""
+function default_parameters()
+    return TOMGRO_parameters(
+        0.495,  # Nm
+        13,     # Nb
+        0.041,  # sigma
+        0.22,   # beta
+        6.0,    # Vmax
+        0.09,   # Qe
+        0.12,   # tau
+        0.61,   # K
+        0.74,   # CE
+        24.0,   # T_CRIT
+        0.95,   # alpha_F
+        0.24,   # v
+        6.0     # LAImax
+    )
+end
 
 """
 ## Initial State

@@ -3,10 +3,18 @@
 
 Resets the TOMGRO simulation environment to its initial state.
 
+# Arguments
+- `parameters`: If provided, it will override the default parameters.
+
 # Returns
 - A TOMGRO state object
+- A TOMGRO parameters object
 """
-function reset()
+function reset(parameters=nothing)
+    if parameters === nothing
+        parameters = default_parameters()
+    end
+
     state = TOMGRO_state(
         N_init, LAI_init, W_init, Wm_init, Wf_init,
         Dict(
@@ -15,7 +23,7 @@ function reset()
             "PPFDd_hist" => Float64[], "CO2_hist" => Float64[]
         )
     )
-    return state
+    return state, parameters
 end
 
 
@@ -29,11 +37,12 @@ Advances the simulation by one day given temperature, PPFD and CO2. The inputs a
 - `Td`: Temperature at the current day
 - `PPFDd`: Photosynthetic photon flux density at the current day
 - `CO2`: CO₂ concentration at the current day
+- `parameters`: TOMGRO parameters
 
 # Returns
 - Updated TOMGRO state object
 """
-function step!(state::TOMGROState, Td::Float64, PPFDd::Float64, CO2::Float64)
+function step!(state::TOMGROState, parameters::TOMGRO_parameters, Td::Float64, PPFDd::Float64, CO2::Float64)
     # Extract state variables
     N, LAI, W, Wm, Wf = state.N, state.LAI, state.W, state.Wm, state.Wf
 
@@ -42,25 +51,25 @@ function step!(state::TOMGROState, Td::Float64, PPFDd::Float64, CO2::Float64)
 
     # dN/dt
     fN_ = fN(Td)
-    dNdt_ = dNdt(fN_)
+    dNdt_ += dNdt(fN_, parameters)
 
     # d(LAI)/dt
     lambda_ = lambda(Td)
-    dLAIdt_ = dLAIdt(LAI, 3.10, N, lambda_, dNdt_)
+    dLAIdt_ = dLAIdt(LAI, 3.10, N, lambda_, dNdt_, parameters)
 
     # dWfdt
     fR_ = fR(N)
-    LFmax_ = LFmax(inCO2[i])
+    LFmax_ = LFmax(inCO2[i], parameters)
     PGRED_ = PGRED(Td)
-    Pg_ = Pg(LFmax_, PGRED_, PPFDd, LAI)
+    Pg_ = Pg(LFmax_, PGRED_, PPFDd, LAI, parameters)
     Rm_ = Rm(Td, W, Wm)
     GRnet_ = GRnet(Pg_, Rm_, fR_)
     fF_ = fF(Td)
-    g_ = g(Tdaytime)
-    dWfdt_ = dWfdt(GRnet_, fF_, N, g_)
+    g_ = g(Tdaytime, parameters)
+    dWfdt_ = dWfdt(GRnet_, fF_, N, g_, parameters)
 
     # dWdt
-    dWdt_ = dWdt(LAI, dWfdt_, GRnet_, 3.10, dNdt_)
+    dWdt_ = dWdt(LAI, dWfdt_, GRnet_, 3.10, dNdt_, parameters)
 
     # dWmdt
     Df_ = Df(Td)
