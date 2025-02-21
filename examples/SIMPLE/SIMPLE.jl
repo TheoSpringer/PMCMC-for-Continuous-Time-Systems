@@ -6,64 +6,67 @@ This module simulates the growth of plants based on environmental factors such a
 ## References
 - Zhao (2019) *A SIMPLE crop model*
 - Daniels (2023) *Optimal Control for Indoor Vertical Farms Based on Crop Growth*
+- Woli (2012) *Agricultural reference index for drought (ARID)*
 """
 module SIMPLE
 
 """
 ## Model Parameters
-Holds the parameters of the TOMGRO simulation.
+Holds the parameters of the SIMPLE simulation.
 
-- `Nm`: maximum rate of node appearance (at optimal temperatures)
-- `Nb`: coefficient in expolinear equation, projection of linear segment of LAI vs N to horizontal axis
-- `sigma`: maximum leaf area expansion per node, coefficient in expolinear equation
-- `beta`: coefficient in expolinear equation
-- `Vmax`: maximum increase in vegetative tissue d.w. growth per node
-- `Qe`: leaf quantum efficiency
-- `tau`: carbon dioxide use efficiency
-- `K`: light extinction coefficient
-- `CE`: conversion coefficient for assimilated carbon into dry matter
-- `T_CRIT`: mean daytime temperature above which fruit abortion starts
-- `alpha_F`: maximum partitioning of new growth to fruit
-- `v`: transition coefficient governing the shift between vegetative and reproductive growth phases
-- `LAImax`: maximum leaf area index
+- `tau_sum`: cumulative temperature requirement from sowing to maturity
+- `HI`: potential harvest index
+- `Ia`: cumulative temperature requirement for leaf area development to intercept 50 % of radiation
+- `Ib`: cumulative temperature till maturity to reach 50 % radiation interception due to leaf senescence
+- `theta_base`: base temperature for phenology development and growth
+- `theta_opt`: optimal temperature for biomass growth
+- `RUE`: Radiation use efficiency
+- `Iheat`: maximum daily reduction in I50B due to heat stress
+- `Iwater`: maximum daily reduction in I50B due to drought stress
+- `theta_heat`: threshold temperature to start accelerating senescence from heat stress
+- `theta_ext`: extreme temperature threshold when RUE becomes 0 due to heat stress
+- `Sco2`: relative increase in RUE per ppm elevated CO2 above 350 ppm
+- `Swater`: sensitivity of RUE to drought stress
+- `Rmax`: maximum fraction of radiation interception
 """
 mutable struct SIMPLE_parameters
-    Eru::Float64
-    Rmax::Int
-    Sco2::Float64
-    theta_base::Float64
-    theta_opt::Float64
-    theta_heat::Float64
-    theta_ext::Float64
-    Iwater::Float64
-    Iheat::Float64
-    Swater::Float64
+    tau_sum::Float64
+    HI::Float64
     Ia::Float64
     Ib::Float64
-    tausum::Float64
-    CO2::Float64
+    theta_base::Float64
+    theta_opt::Float64
+    RUE::Float64
+    Iheat::Float64
+    Iwater::Float64
+    theta_heat::Float64
+    theta_ext::Float64
+    Sco2::Float64
+    Swater::Float64
+    Rmax::Int
 end
 
 """
     default_parameters()
 
-Returns the default TOMGRO model parameters.
+Returns the default SIMPLE model parameters (tomato crop, SunnySD cultivar).
 """
 function default_parameters()
     return TOMGROParameters(
-        0.495,  # Nm
-        13,     # Nb
-        0.041,  # sigma
-        0.22,   # beta
-        6.0,    # Vmax
-        0.09,   # Qe
-        0.12,   # tau
-        0.61,   # K
-        0.74,   # CE
-        24.0,   # T_CRIT
-        0.95,   # alpha_F
-        0.24,   # v
-        6.0     # LAImax
+        2800,   # tau_sum
+        0.68,   # HI
+        520,    # Ia
+        400,    # Ib
+        6.0,    # theta_base
+        26.0,   # theta_opt
+        1.00 * 1e-3,    # RUE
+        100.0,  # Iheat
+        5.0,    # Iwater
+        32.0,   # theta_heat
+        45.0,   # theta_ext
+        0.07,   # Sco2
+        2.5,    # Swater
+        0.95   # Rmax
     )
 end
 
@@ -78,7 +81,6 @@ Initial values for model state variables.
 const mB_init = 0.0
 const tau_init = 0.0
 const I50B_init = 50.0
-
 
 """
 ## SIMPLE State
@@ -95,5 +97,10 @@ mutable struct SIMPLE_state
     I50B::Float64
     history::Dict{String,Vector{Float64}}
 end
+
+# Include dependencies
+include("dynamics.jl")
+include("environment.jl")
+include("plotting.jl")
 
 end

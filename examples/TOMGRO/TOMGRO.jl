@@ -6,10 +6,10 @@ It models various aspects of plant development, including node formation, leaf a
 
 ## References
 - [Code Reference](https://gist.github.com/gyosit/abeab4e595d7ddcd65b55c1270d240c8)
-- Jones (1999) *Reduced state-variable tomato growth model*
-- Jones (1991) *A dynamic tomato growth and yield model (TOMGRO)*
-- Dimokas (2009) *Calibration and validation of a biological model to simulate the development and production of tomatoes in Mediterranean greenhouses during winter period*
-- Heuvelink (1994) *Dry-matter partitioning in a tomato crop: Comparison of two simulation models*
+- Jones, J. W., A. Kenig, and C. E. Vallejos. "Reduced state–variable tomato growth model." Transactions of the ASAE 42.1 (1999): 255-265.
+- Jones, James W., et al. "A dynamic tomato growth and yield model (TOMGRO)." Transactions of the ASAE 34.2 (1991): 663-0672.
+- Dimokas, George, Marc Tchamitchian, and Constantin Kittas. "Calibration and validation of a biological model to simulate the development and production of tomatoes in Mediterranean greenhouses during winter period." biosystems engineering 103.2 (2009): 217-227.
+- Heuvelink, Egbert, and Nadia Bertin. "Dry-matter partitioning in a tomato crop: comparison of two simulation models." Journal of horticultural science 69.5 (1994): 885-903.
 """
 module TOMGRO
 using Plots
@@ -24,7 +24,7 @@ Holds the parameters of the TOMGRO simulation.
 - `Nb`: coefficient in expolinear equation, projection of linear segment of LAI vs N to horizontal axis
 - `sigma`: maximum leaf area expansion per node, coefficient in expolinear equation
 - `beta`: coefficient in expolinear equation
-- `Vmax`: maximum increase in vegetative tissue d.w. growth per node
+- `Vmax`: maximum increase in vegetative tissue dry weight growth per node
 - `Qe`: leaf quantum efficiency
 - `tau`: carbon dioxide use efficiency
 - `K`: light extinction coefficient

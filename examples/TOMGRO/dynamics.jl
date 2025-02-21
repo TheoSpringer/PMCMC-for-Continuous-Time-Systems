@@ -92,7 +92,7 @@ Compute total dry weight growth rate; see Jones(1999).
 - `parameters`: TOMGRO parameters
 
 # Returns
-- Above-ground dry weight growth rate
+- above-ground dry weight growth rate
 """
 function dWdt(LAI, dWfdt_, GRnet_, dens, dNdt_, parameters::TOMGRO_parameters)
     if LAI >= parameters.LAImax
@@ -110,7 +110,7 @@ Compute fruit development rate, depending on temperature; see Jones(1991).
 - `T`: Temperature
 
 # Returns
-- Fruit development rate
+- fruit development rate
 """
 function Df(T)
     if 9 < T <= 28
@@ -151,7 +151,7 @@ Compute fraction partitioning of biomass to roots; see Jones(1991).
 - `N`: Number of nodes on mainstem
 
 # Returns
-- Root fraction value
+- root fraction value
 """
 function fR(N)
     if N >= 30
@@ -169,7 +169,7 @@ Compute the maximum leaf photosynthetic rate; see Jones(1991).
 - `parameters`: TOMGRO parameters
 
 # Returns
-- Maximum leaf photosynthetic rate
+- maximum leaf photosynthetic rate
 """
 function LFmax(CO2, parameters::TOMGRO_parameters)
     return parameters.tau * CO2
@@ -182,7 +182,7 @@ Compute photosynthetic rate reduction factor under suboptimal temperatures.
 - `T`: Temperature
 
 # Returns
-- Temperature-based reduction factor
+- temperature-based reduction factor
 """
 function PGRED(T)
     if 0 < T <= 12
@@ -205,7 +205,7 @@ Compute photosynthesis rate; see Jones(1991).
 - `parameters`: TOMGRO parameters
 
 # Returns
-- Photosynthesis rate
+- photosynthesis rate
 """
 function Pg(LFmax_, PGRED_, PPFD, LAI, parameters::TOMGRO_parameters)
     D = 2.593 # coefficient to convert Pg from CO2 to CH2O
@@ -225,7 +225,7 @@ Compute maintenance respiration rate; see Jones(1999).
 - `Wm`: Mature fruit dry weight
 
 # Returns
-- Maintenance respiration rate
+- maintenance respiration rate
 """
 function Rm(T, W, Wm)
     Q10 = 1.4 # Jones(1991)
@@ -242,7 +242,7 @@ Compute net above-ground growth rate.
 - `fR_`: Root fraction
 
 # Returns
-- Net growth rate
+- net growth rate
 """
 function GRnet(Pg_, Rm_, fR_)
     E = 0.717 # Dimokas(2009)
@@ -256,7 +256,7 @@ Compute fruit partitioning factor; Jones(1991).
 - `Td`: Average daily temperature
 
 # Returns
-- Fruit partitioning factor
+- fruit partitioning factor
 """
 function fF(Td)
     if 8 < Td <= 28
@@ -276,7 +276,7 @@ Compute growth reduction factor due to high daytime temperature; see Jones(1999)
 - `parameters`: TOMGRO parameters
 
 # Returns
-- Growth reduction factor
+- growth reduction factor
 """
 function g(T_daytime, parameters::TOMGRO_parameters)
     if T_daytime < parameters.T_CRIT
@@ -297,7 +297,7 @@ Compute the growth rate of fruit dry weight; see Jones(1999).
 - `parameters`: TOMGRO parameters
 
 # Returns
-- Fruit dry weight growth rate
+- fruit dry weight growth rate
 """
 function dWfdt(GRnet_, fF_, N, g_, parameters::TOMGRO_parameters)
     NFF = 22.0 # nodes per plant when first fruit appears

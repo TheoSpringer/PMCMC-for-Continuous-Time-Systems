@@ -1,16 +1,16 @@
 """
-    reset()
+    TOMGRO_reset(parameters=nothing)
 
 Resets the TOMGRO simulation environment to its initial state.
 
 # Arguments
-- `parameters`: If provided, it will override the default parameters.
+- `parameters`: if provided, it will override the default parameters.
 
 # Returns
-- A TOMGRO state object
-- A TOMGRO parameters object
+- TOMGRO state
+- TOMGRO parameters
 """
-function reset(parameters=nothing)
+function TOMGRO_reset(parameters=nothing)
     if parameters === nothing
         parameters = default_parameters()
     end
@@ -26,23 +26,22 @@ function reset(parameters=nothing)
     return state, parameters
 end
 
-
 """
-    step!(state, inT, inPPFD, inCO2)
+    TOMGRO_step!(state::TOMGRO_state, parameters::TOMGRO_parameters, Td, PPFDd, CO2)
 
-Advances the simulation by one day given temperature, PPFD and CO2. The inputs are assumed to be constant over the day.
+Advances the simulation by one day given temperature, PPFD and CO₂. The inputs are assumed to be constant over the day.
 
 # Arguments
-- `state`: Current TOMGRO state object
-- `Td`: Temperature at the current day
-- `PPFDd`: Photosynthetic photon flux density at the current day
-- `CO2`: CO₂ concentration at the current day
+- `state`: current TOMGRO state
 - `parameters`: TOMGRO parameters
+- `Td`: temperature
+- `PPFDd`: photosynthetic photon flux density
+- `CO2`: CO₂ concentration
 
 # Returns
-- Updated TOMGRO state object
+- updated TOMGRO state
 """
-function step!(state::TOMGROState, parameters::TOMGRO_parameters, Td::Float64, PPFDd::Float64, CO2::Float64)
+function TOMGRO_step!(state::TOMGRO_state, parameters::TOMGRO_parameters, Td, PPFDd, CO2)
     # Extract state variables
     N, LAI, W, Wm, Wf = state.N, state.LAI, state.W, state.Wm, state.Wf
 

@@ -11,11 +11,8 @@ Determine the parameter ``\\epsilon``. ``1-\\epsilon`` corresponds to a bound on
 - `K`: number of scenarios
 - `β`: confidence parameter
 
-This function is based on the paper
-
-    S. Garatti and M. C. Campi, “Risk and complexity in scenario optimization,” Mathematical Programming, vol. 191, no. 1, pp. 243–279, 2022.
-
-and the code provided in the appendix.
+## References
+- S. Garatti and M. C. Campi, “Risk and complexity in scenario optimization,” Mathematical Programming, vol. 191, no. 1, pp. 243–279, 2022.
 """
 function epsilon(s::Int64, K::Int64, β::Float64)
     alphaU = beta_inc_inv(K - s + 1, s, β)[2]

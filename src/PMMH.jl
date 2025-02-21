@@ -82,9 +82,8 @@ Run particle marginal Metropolis-Hastings (PMMH) with ancestor sampling to obtai
 - `sample_x_init`: function that returns a sample from the distribution over initial states; has no inputs
 - `x_prim`: prespecified trajectory for the first iteration
 
-This function is based on the paper
-
-    Andrieu, Christophe, Arnaud Doucet, and Roman Holenstein. "Particle Markov chain Monte Carlo methods." Journal of the Royal Statistical Society Series B: Statistical Methodology 72.3 (2010): 269-342.
+## References
+- Andrieu, Christophe, Arnaud Doucet, and Roman Holenstein. "Particle Markov chain Monte Carlo methods." Journal of the Royal Statistical Society Series B: Statistical Methodology 72.3 (2010): 269-342.
 """
 function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, pdf_theta::Function, propose_theta::Function, theta_init, sample_x_init::Function)
     # Total number of models
