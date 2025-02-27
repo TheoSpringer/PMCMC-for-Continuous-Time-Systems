@@ -6,7 +6,7 @@ Plots the simulation history for a TOMGRO_state object.
 # Arguments
 - `state`: TOMGRO state object
 """
-function plot_history(state::TOMGROState, climate_data=nothing)
+function plot_history(state::TOMGRO_state)
     t = 1:length(state.history["N_hist"])  # Time axis (days)
 
     # Plot states
@@ -17,9 +17,9 @@ function plot_history(state::TOMGROState, climate_data=nothing)
     p5 = plot(t, state.history["Wm_hist"], xlabel="Days", ylabel="Mature Fruit Dry Weight (g/m²)", title="Mature Fruit Dry Weight Over Time", lw=2)
 
     # Plot inputs
-    p6 = plot(t_climate, state.history["Td_hist"], xlabel="Days", ylabel="Temperature (°C)", title="Temperature Over Time", lw=2)
-    p7 = plot(t_climate, state.history["PPFDd_hist"], xlabel="Days", ylabel="PPFD (μmol/m²/s)", title="PPFD Over Time", lw=2)
-    p8 = plot(t_climate, state.history["CO2_hist"], xlabel="Days", ylabel="CO2 Concentration (ppm)", title="CO2 Concentration Over Time", lw=2)
+    p6 = plot(t, state.history["Td_hist"], xlabel="Days", ylabel="Temperature (°C)", title="Temperature Over Time", lw=2)
+    p7 = plot(t, state.history["PPFDd_hist"], xlabel="Days", ylabel="PPFD (μmol/m²/s)", title="PPFD Over Time", lw=2)
+    p8 = plot(t, state.history["CO2_hist"], xlabel="Days", ylabel="CO2 Concentration (ppm)", title="CO2 Concentration Over Time", lw=2)
 
     display(p1)
     display(p2)

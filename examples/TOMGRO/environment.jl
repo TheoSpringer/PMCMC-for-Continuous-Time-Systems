@@ -1,5 +1,5 @@
 """
-    TOMGRO_reset(parameters=nothing)
+    reset(parameters=nothing)
 
 Resets the TOMGRO simulation environment to its initial state.
 
@@ -10,7 +10,7 @@ Resets the TOMGRO simulation environment to its initial state.
 - TOMGRO state
 - TOMGRO parameters
 """
-function TOMGRO_reset(parameters=nothing)
+function reset(parameters=nothing)
     if parameters === nothing
         parameters = default_parameters()
     end
@@ -27,7 +27,7 @@ function TOMGRO_reset(parameters=nothing)
 end
 
 """
-    TOMGRO_step!(state::TOMGRO_state, parameters::TOMGRO_parameters, Td, PPFDd, CO2)
+    step!(state::TOMGRO_state, parameters::TOMGRO_parameters, Td, PPFDd, CO2)
 
 Advances the simulation by one day given temperature, PPFD and CO₂. The inputs are assumed to be constant over the day.
 
@@ -41,7 +41,7 @@ Advances the simulation by one day given temperature, PPFD and CO₂. The inputs
 # Returns
 - updated TOMGRO state
 """
-function TOMGRO_step!(state::TOMGRO_state, parameters::TOMGRO_parameters, Td, PPFDd, CO2)
+function step!(state::TOMGRO_state, parameters::TOMGRO_parameters, Td, PPFDd, CO2)
     # Extract state variables
     N, LAI, W, Wm, Wf = state.N, state.LAI, state.W, state.Wm, state.Wf
 
@@ -50,7 +50,7 @@ function TOMGRO_step!(state::TOMGRO_state, parameters::TOMGRO_parameters, Td, PP
 
     # dN/dt
     fN_ = fN(Td)
-    dNdt_ += dNdt(fN_, parameters)
+    dNdt_ = dNdt(fN_, parameters)
 
     # d(LAI)/dt
     lambda_ = lambda(Td)
@@ -58,7 +58,7 @@ function TOMGRO_step!(state::TOMGRO_state, parameters::TOMGRO_parameters, Td, PP
 
     # dWfdt
     fR_ = fR(N)
-    LFmax_ = LFmax(inCO2[i], parameters)
+    LFmax_ = LFmax(CO2, parameters)
     PGRED_ = PGRED(Td)
     Pg_ = Pg(LFmax_, PGRED_, PPFDd, LAI, parameters)
     Rm_ = Rm(Td, W, Wm)

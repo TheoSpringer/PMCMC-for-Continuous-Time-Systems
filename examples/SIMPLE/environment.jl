@@ -1,5 +1,5 @@
 """
-    SIMPLE_reset(parameters=nothing)
+    reset(parameters=nothing)
 
 Resets the SIMPLE simulation environment to its initial state.
 
@@ -10,7 +10,7 @@ Resets the SIMPLE simulation environment to its initial state.
 - SIMPLE state
 - SIMPLE parameters
 """
-function SIMPLE_reset(parameters=nothing)
+function reset(parameters=nothing)
     if parameters === nothing
         parameters = default_parameters()
     end
@@ -27,7 +27,7 @@ function SIMPLE_reset(parameters=nothing)
 end
 
 """
-    SIMPLE_step!(state::SIMPLE_state, parameters::SIMPLE_parameters, theta, D, R, CO2)
+    step!(state::SIMPLE_state, parameters::SIMPLE_parameters, theta, D, R, CO2)
 
 Advances the simulation by one day given temperature, relative level of drought and CO₂. The inputs are assumed to be constant over the day.
 
@@ -42,7 +42,7 @@ Advances the simulation by one day given temperature, relative level of drought 
 # Returns
 - updated SIMPLE state
 """
-function SIMPLE_step!(state::SIMPLE_state, parameters::SIMPLE_parameters, theta, D, R, CO2)
+function step!(state::SIMPLE_state, parameters::SIMPLE_parameters, theta, D, R, CO2)
     # Extract state variables
     mB, tau, I50B = state.mB, state.tau, state.I50B
 

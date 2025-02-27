@@ -9,6 +9,9 @@ This module simulates the growth of plants based on environmental factors such a
 - Woli (2012) *Agricultural reference index for drought (ARID)*
 """
 module SIMPLE
+using Plots
+
+export SIMPLE_state, SIMPLE_parameters, reset, step!, get_yield, plot_history
 
 """
 ## Model Parameters
@@ -43,7 +46,7 @@ mutable struct SIMPLE_parameters
     theta_ext::Float64
     Sco2::Float64
     Swater::Float64
-    Rmax::Int
+    Rmax::Float64
 end
 
 """
@@ -52,7 +55,7 @@ end
 Returns the default SIMPLE model parameters (tomato crop, SunnySD cultivar).
 """
 function default_parameters()
-    return TOMGROParameters(
+    return SIMPLE_parameters(
         2800,   # tau_sum
         0.68,   # HI
         520,    # Ia

@@ -14,7 +14,7 @@ It models various aspects of plant development, including node formation, leaf a
 module TOMGRO
 using Plots
 
-export reset, step!, plot_history
+export TOMGRO_state, TOMGRO_parameters, reset, step!, plot_history, radiation2ppfd
 
 """
 ## Model Parameters
