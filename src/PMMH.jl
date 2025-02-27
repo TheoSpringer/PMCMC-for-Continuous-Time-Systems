@@ -102,20 +102,15 @@ function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Fun
     accepted_samples = 1
     current_sample = 1
     theta = Array{Float64}(undef, n_theta, K_total)
+    theta[:, 1] .= theta_init
     log_likelihood = Array{Float64}(undef, K_total)
+    log_likelihood[1] .= -Inf
+    p_theta_accepted = 0;
 
     # Time PMMH sampler.
     learning_timer = time()
 
     println("### Started PMMH sampling")
-
-    # Get likelihood of initial theta.
-    f(x, u) .= f_theta(theta_init, x, u)
-    g(x, u) .= g_theta(theta_init, x, u)
-    sample_v(N) .= sample_v_theta(theta_init, N)
-    log_pdf_w(w) .= log_pdf_w_theta(theta_init, w)
-    log_likelihood[1] .= particle_filter(u, y, n_x, N, f, g, sample_v, log_pdf_w, sample_x_init)[3]
-    theta[:, 1] .= theta_init
 
     while accepted_samples <= K_total
         # Propose new parameters.
@@ -135,12 +130,13 @@ function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Fun
         x_pf, w, log_likelihood_prop = particle_filter(u, y, n_x, N, f, g, sample_v, log_pdf_w, sample_x_init)
 
         # Compute acceptance probability.
-        acceptance_ratio = exp(log_likelihood_prop - log_likelihood[accepted_samples]) * (p_theta_prop / pdf_theta(theta[:, accepted_samples])) * proposal_pdf_ratio(theta[:, accepted_samples], theta_prop)
+        acceptance_ratio = exp(log_likelihood_prop - log_likelihood[accepted_samples]) * (p_theta_prop / p_theta_accepted) * proposal_pdf_ratio(theta[:, accepted_samples], theta_prop)
 
         # Accept or reject the proposal.
         if rand() < acceptance_ratio
             theta[:, accepted_samples+1] .= theta_prop
             log_likelihood[accepted_samples+1] .= log_likelihood_prop
+            p_theta_accepted = p_theta_prop
             accepted_samples += 1
 
             # Use sample if the burn-in period is reached and the sample is not removed by thinning.

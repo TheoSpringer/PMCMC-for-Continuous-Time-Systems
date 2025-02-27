@@ -102,5 +102,4 @@ end
 include("dynamics.jl")
 include("environment.jl")
 include("plotting.jl")
-
 end
