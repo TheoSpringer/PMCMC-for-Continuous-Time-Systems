@@ -6,6 +6,8 @@ using .TOMGRO
 
 # Parameters
 days = 100 # number of days
+
+# Input data
 T = fill(25.0, days)
 D = fill(0.0, days)
 R = fill(25.0, days)
