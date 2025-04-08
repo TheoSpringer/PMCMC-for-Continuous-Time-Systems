@@ -59,7 +59,7 @@ end
 
 
 """
-    particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, pdf_theta::Function, propose_theta::Function, theta_init, sample_x_init::Function)
+    function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init; print_progress=true)
 
 Run particle marginal Metropolis-Hastings (PMMH) with ancestor sampling to obtain samples ``\\{\\theta, x_{0:t_0-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(\\theta, x_{0:t_0-1} \\mid \\mathbb{D}=\\{u_{0:t_0-1}, y_{0:t_0-1}\\})``.
 
@@ -75,48 +75,49 @@ Run particle marginal Metropolis-Hastings (PMMH) with ancestor sampling to obtai
 - `g_theta`: measurement function parametrized by theta; has inputs (theta, x, u)
 - `sample_v_theta`: function that returns N samples from the process noise distribution parametrized by theta; has input (theta, N)
 - `log_pdf_w_theta`: function that returns the logarithm of the probability density function of the measurement noise parametrized by theta; has inputs (theta, w)
-- `pdf_theta`: probability density function of theta (prior); has input (theta)
+- `log_pdf_theta`: function that returns the logarithm of the probability density function of theta (prior); has input (theta)
 - `propose_theta`: function that proposes new theta (proposal distribution); has input (theta)
-- `proposal_pdf_ratio`: function that computes the ratio of proposal densities; has input arguments (theta_accepted, theta_prop)
+- `log_ratio_proposal_pdf`: function that returns the logarithm of the ratio of proposal densities; has input arguments (theta_accepted, theta_prop)
 - `theta_init`: initial theta
-- `sample_x_init`: function that returns a sample from the distribution over initial states; has no inputs
-- `x_prim`: prespecified trajectory for the first iteration
+- `print_progress`: if set to true, the progress is printed
 
 ## References
 - Andrieu, Christophe, Arnaud Doucet, and Roman Holenstein. "Particle Markov chain Monte Carlo methods." Journal of the Royal Statistical Society Series B: Statistical Methodology 72.3 (2010): 269-342.
 """
-function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, pdf_theta::Function, propose_theta::Function, theta_init, sample_x_init::Function)
-    # Total number of models
-    K_total = 1 + K_b + 1 + (K - 1) * (k_d + 1)
+function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init; print_progress=true)
+    # Total number of samples to be generated
+    K_total = K_b + 1 + (K - 1) * (k_d + 1)
 
-    # Get number of inputs, etc.
-    n_u = size(u, 1)
+    # Get number of parameters, etc.
     n_theta = length(theta_init)
+    n_u = size(u, 1)
     T = size(y, 2)
 
     # Initialize and pre-allocate.
     PMMH_samples = Vector{PMMH_sample}(undef, K)
     for k in 1:K
-        PMMH_samples[k] = PMMH_sample(Array{Float64}(undef, size(theta_init)), Array{Float64}(undef, N), Array{Float64}(undef, n_x, N), Array{Float64}(undef, n_u))
+        PMMH_samples[k] = PMMH_sample(Array{Float64}(undef, n_theta), Array{Float64}(undef, n_x, N), Array{Float64}(undef, N), Array{Float64}(undef, n_u))
     end
-    accepted_samples = 1
+    accepted_samples = 0
     current_sample = 1
-    theta = Array{Float64}(undef, n_theta, K_total)
-    theta[:, 1] .= theta_init
-    log_likelihood = Array{Float64}(undef, K_total)
-    log_likelihood[1] .= -Inf
-    p_theta_accepted = 0;
+    n_proposals = 0
+    theta = theta_init
+    log_likelihood = -Inf
+    log_p_theta = -Inf
 
     # Time PMMH sampler.
-    learning_timer = time()
+    sampling_timer = time()
 
-    println("### Started PMMH sampling")
+    if print_progress
+        println("### Started PMMH sampling")
+    end
 
     while accepted_samples <= K_total
         # Propose new parameters.
-        theta_prop = propose_theta(theta[:, accepted_samples])
-        p_theta_prop = pdf_theta(theta_prop)
-        if !(p_theta_prop > 0)
+        n_proposals += 1
+        theta_prop = propose_theta(theta)
+        log_p_theta_prop = log_pdf_theta(theta_prop)
+        if !isfinite(log_p_theta_prop)
             continue
         end
 
@@ -130,17 +131,17 @@ function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Fun
         x_pf, w, log_likelihood_prop = particle_filter(u, y, n_x, N, f, g, sample_v, log_pdf_w, sample_x_init)
 
         # Compute acceptance probability.
-        acceptance_ratio = exp(log_likelihood_prop - log_likelihood[accepted_samples]) * (p_theta_prop / p_theta_accepted) * proposal_pdf_ratio(theta[:, accepted_samples], theta_prop)
+        log_acceptance_ratio = log_likelihood_prop - log_likelihood + log_p_theta_prop - log_p_theta + log_ratio_proposal_pdf(theta, theta_prop)
 
         # Accept or reject the proposal.
-        if rand() < acceptance_ratio
-            theta[:, accepted_samples+1] .= theta_prop
-            log_likelihood[accepted_samples+1] .= log_likelihood_prop
-            p_theta_accepted = p_theta_prop
+        if log(rand()) < log_acceptance_ratio
             accepted_samples += 1
+            theta = theta_prop
+            log_p_theta = log_p_theta_prop
+            log_likelihood = log_likelihood_prop
 
             # Use sample if the burn-in period is reached and the sample is not removed by thinning.
-            if K_b + 1 < accepted_samples && (mod(accepted_samples - (K_b + 2), k_d + 1) == 0)
+            if (K_b < accepted_samples) && (mod(accepted_samples - (K_b + 1), k_d + 1) == 0)
                 PMMH_samples[current_sample].theta .= theta_prop
                 PMMH_samples[current_sample].x_m1 .= x_pf[:, :, end]
                 PMMH_samples[current_sample].w_m1 .= w[end, :]
@@ -149,18 +150,26 @@ function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Fun
             end
 
             # Print progress.
-            @printf("\e[32m%i/%i samples accepted\e[0m\n", accepted_samples, K_total)
+            if print_progress
+                @printf("\e[32m%i/%i samples accepted\e[0m\n", accepted_samples, K_total)
+            end
         else
             # Print progress.
-            @printf("\e[31m%i/%i samples accepted\e[0m\n", accepted_samples, K_total)
+            if print_progress
+                @printf("\e[31m%i/%i samples accepted\e[0m\n", accepted_samples, K_total)
+            end
         end
     end
 
-    # Print runtime.
-    time_learning = time() - learning_timer
-    @printf("### PMMH sampling complete\nRuntime: %.2f s\n", time_learning)
+    time_sampling = time() - sampling_timer
+    acceptance_ratio = ((K_total - 1) / n_proposals) * 100
 
-    return PMMH_samples
+    # Print results.
+    if print_progress
+        @printf("### PMMH sampling complete\nRuntime: %.2f s\nAcceptance ratio: %.2f %%\n", time_sampling, acceptance_ratio)
+    end
+
+    return PMMH_samples, time_sampling, acceptance_ratio
 end
 
 """

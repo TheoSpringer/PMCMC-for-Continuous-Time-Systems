@@ -7,15 +7,15 @@ using .TOMGRO
 using .PMMHopt
 
 # Specify seed (for reproducible results).
-Random.seed!(82)
+Random.seed!(1)
 
 # Time PMMH algorithm.
 sampling_timer = time()
 
 # Learning parameters
-K = 200 # number of PMMH samples
+K = 200 # number of PMMH samples per stage
 k_d = 50 # number of samples to be skipped to decrease correlation (thinning)
-K_b = 1000 # length of burn-in period
+K_b = 1000 # length of burn-in period for each stage
 N = 30 # number of particles of the particle filter
 
 # Number of states, etc.
@@ -23,8 +23,7 @@ n_x = 3 # number of states
 n_u = 2 # number of control inputs
 n_y = 2 # number of outputs
 
-# State-space prior and proposal distributions.
-# TODO!
+# State-space prior and proposal distribution.
 
 # Initial guess for model parameters
 
@@ -36,11 +35,12 @@ g(x, u) = [1 0] * x # observation function
 R = 0.1 # variance of zero-mean Gaussian measurement noise
 
 # Parameters for data generation
-D = 2000 # number of days for training
-D_test = 500  # number of days used for testing (via forward simulation - see below)
+D = 50 # number of days for training
+D_test = 50  # number of days used for testing (via forward simulation - see below)
 D_all = D + D_test
 
 # Generate training data.
+
 
 # Unknown system
 
