@@ -1,6 +1,7 @@
 "Core module of the PMMHopt algorithm. Contains all necessary functions such as the particle marginal Metropolis Hastings sampler and scenario optimization."
 module PMMHopt
 using LinearAlgebra
+using StatsBase
 using Plots
 using Printf
 using JuMP

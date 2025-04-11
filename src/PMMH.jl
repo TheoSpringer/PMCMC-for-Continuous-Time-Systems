@@ -26,7 +26,7 @@ function particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Funct
     w = Array{Float64}(undef, T, N)
     x_pf = Array{Float64}(undef, n_x, N, T)
     a = Array{Int64}(undef, T, N)
-    log_w = Array{Float64}(undef, N)
+    log_w = Array{Float64}(undef, 1, N)
     log_likelihood = 0.0
 
     # Sample initial states.
@@ -47,7 +47,7 @@ function particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Funct
         # PF weight update based on measurement model (logarithms are used for numerical reasons).
         log_w .= log_pdf_w(y[:, t] .- g(x_pf[:, :, t], repeat(u[:, t], 1, N)))
         max_log_w = maximum(log_w)
-        w[t, :] .= exp.(log_w .- max_log_w)
+        w[[t], :] .= exp.(log_w .- max_log_w)
         sum_w = sum(w[t, :])
         w[t, :] .= w[t, :] ./ sum_w
 
@@ -59,7 +59,7 @@ end
 
 
 """
-    function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init; print_progress=true)
+    function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_init::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init; print_progress=true)
 
 Run particle marginal Metropolis-Hastings (PMMH) with ancestor sampling to obtain samples ``\\{\\theta, x_{0:t_0-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(\\theta, x_{0:t_0-1} \\mid \\mathbb{D}=\\{u_{0:t_0-1}, y_{0:t_0-1}\\})``.
 
@@ -73,6 +73,7 @@ Run particle marginal Metropolis-Hastings (PMMH) with ancestor sampling to obtai
 - `N`: number of particles
 - `f_theta`: state transition function parametrized by theta; has inputs (theta, x, u)
 - `g_theta`: measurement function parametrized by theta; has inputs (theta, x, u)
+- `sample_x_init`: function that returns a sample from the distribution over initial states; has no inputs
 - `sample_v_theta`: function that returns N samples from the process noise distribution parametrized by theta; has input (theta, N)
 - `log_pdf_w_theta`: function that returns the logarithm of the probability density function of the measurement noise parametrized by theta; has inputs (theta, w)
 - `log_pdf_theta`: function that returns the logarithm of the probability density function of theta (prior); has input (theta)
@@ -84,7 +85,7 @@ Run particle marginal Metropolis-Hastings (PMMH) with ancestor sampling to obtai
 ## References
 - Andrieu, Christophe, Arnaud Doucet, and Roman Holenstein. "Particle Markov chain Monte Carlo methods." Journal of the Royal Statistical Society Series B: Statistical Methodology 72.3 (2010): 269-342.
 """
-function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init; print_progress=true)
+function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_init::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init; print_progress=true)
     # Total number of samples to be generated
     K_total = K_b + 1 + (K - 1) * (k_d + 1)
 
@@ -116,7 +117,7 @@ function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Fun
         # Propose new parameters.
         n_proposals += 1
         theta_prop = propose_theta(theta)
-        log_p_theta_prop = log_pdf_theta(theta_prop)
+        log_p_theta_prop = log_pdf_theta(theta_prop)[]
         if !isfinite(log_p_theta_prop)
             continue
         end

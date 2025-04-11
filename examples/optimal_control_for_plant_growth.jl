@@ -1,3 +1,8 @@
+using LinearAlgebra
+using Random
+using Distributions
+using Plots
+
 include("SIMPLE/SIMPLE.jl")
 include("TOMGRO/TOMGRO.jl")
 include("../src/PMMHopt.jl")
@@ -12,7 +17,7 @@ Random.seed!(1)
 # Time PMMH algorithm.
 sampling_timer = time()
 
-# Learning parameters
+# Learning parameters.
 K = 200 # number of PMMH samples per stage
 k_d = 50 # number of samples to be skipped to decrease correlation (thinning)
 K_b = 1000 # length of burn-in period for each stage
@@ -23,58 +28,137 @@ n_x = 3 # number of states
 n_u = 2 # number of control inputs
 n_y = 2 # number of outputs
 
-# State-space prior and proposal distribution.
+# State transition function.
+f_theta(theta, x, u) = SIMPLE.f_theta(theta, x, u)
 
-# Initial guess for model parameters
+# Zero-mean Gaussian process noise with variance Q - assumed to be known (without loss of generality).
+Q = Diagonal([0.01, 5, 5]) # variance of process noise
+sample_v_theta(theta, N) = rand(MvNormal(zeros(n_x), Q), N) # sample process noise
+
+# Measurement function - assumed to be known (without loss of generality).
+g_theta(theta, x, u) = [1 0 0; 0 1 0] * x # observation function
+
+# Zero-mean Gaussian measurement noise with known variance R - normalizing factors are ommited as they cancel out in the acceptance ratio.
+R = Diagonal([0.1^2, 13]) # variance of zero-mean Gaussian measurement noise
+sample_w_theta(theta, N) = rand(MvNormal(zeros(n_y), R), N) # sample measurement noise
+log_pdf_w_theta(theta, w) = -0.5 * sum(w .* (R \ w), dims=1) # log pdf of measurement noise, scaling 
+
+# Prior for parameters.
+theta_mean = [
+    2800,   # tau_sum
+    520,    # Ia
+    400,    # Ib
+    6.0,    # theta_base
+    26.0,   # theta_opt
+    1.00 * 1e-3,    # RUE
+    100.0,  # Iheat
+    5.0,    # Iwater
+    32.0,   # theta_heat
+    45.0,   # theta_ext
+    0.07,   # Sco2
+    2.5,    # Swater
+    0.95,   # Rmax
+]
+
+theta_var = [
+    2800,   # tau_sum
+    520,    # Ia
+    400,    # Ib
+    6.0,    # theta_base
+    26.0,   # theta_opt
+    1.00 * 1e-3,    # RUE
+    100.0,  # Iheat
+    5.0,    # Iwater
+    32.0,   # theta_heat
+    45.0,   # theta_ext
+    0.07,   # Sco2
+    2.5,    # Swater
+    0.95,   # Rmax
+]
+
+# Log pdf of prior - normalizing factors are ommited as they cancel out in the acceptance ratio.
+theta_cov = Diagonal(theta_var) # covariance matrix of prior
+log_pdf_theta(theta) = -0.5 * sum((theta - theta_mean) .* (theta_cov \ (theta - theta_mean)), dims=1)
+
+# Initial proposal distribution.
+propose_theta(theta) = rand(MvNormal(theta, theta_cov))
+log_ratio_proposal_pdf(theta_accepted, theta_prop) = 1
+proposal_variance_scaling = 1.0 # scaling factor for the proposal variance
+
+# Initial guess for model parameters.
+theta_init = theta_mean
 
 # Normally distributed initial state
+x_init_mean = [0, 0, 50] # mean
+x_init_var = Diagonal([1e-5, 1e-5, 10]) # variance
+sample_x_init() = rand(MvNormal(x_init_mean, x_init_var))
 
-# Define measurement model - assumed to be known (without loss of generality).
-# Make sure that g(x, u) is defined in vectorized form, i.e., g(zeros(n_x, N), zeros(n_u, N)) should return a matrix of dimension (n_y, N).
-g(x, u) = [1 0] * x # observation function
-R = 0.1 # variance of zero-mean Gaussian measurement noise
-
-# Parameters for data generation
-D = 50 # number of days for training
-D_test = 50  # number of days used for testing (via forward simulation - see below)
-D_all = D + D_test
+# Parameters for data generation.
+T_train = 50 # number of days for training
+T_test = 50  # number of days used for testing (via forward simulation - see below)
+T_total = T_train + T_test
 
 # Generate training data.
+theta_true = [
+    2800,   # tau_sum
+    520,    # Ia
+    400,    # Ib
+    6.0,    # theta_base
+    26.0,   # theta_opt
+    1.00 * 1e-3,    # RUE
+    100.0,  # Iheat
+    5.0,    # Iwater
+    32.0,   # theta_heat
+    45.0,   # theta_ext
+    0.07,   # Sco2
+    2.5,    # Swater
+    0.95,   # Rmax
+]
 
-
-# Unknown system
+f_true(x, u) = f_theta(theta_true, x, u) # true state transition function
+g_true(x, u) = g_theta(theta_true, x, u) # true measurement function
+R_true = R # true measurement noise variance
+sample_v_true(N) = sample_v_theta(theta_true, N)
+sample_w_true(N) = sample_w_theta(theta_true, N)
 
 # Input trajectory used to generate training and test data
-T = fill(25.0, days)
-D = fill(0.0, days)
-R = fill(25.0, days)
-PPFD = TOMGRO.radiation2ppfd(R)
-CO2 = fill(400.0, days)
+u = [fill(25.0, T_total)'; fill(0.0, T_total)'; fill(25.0, T_total)']
 
 # Generate data by forward simulation.
-state_SIMPLE, parameters_SIMPLE = SIMPLE.reset()
-for d in 1:d_training
-    SIMPLE.step!(state_SIMPLE, parameters_SIMPLE, T[d], D[d], R[d], CO2[d])
+x = Array{Float64}(undef, n_x, T_total) # true latent state trajectory
+y = Array{Float64}(undef, n_y, T_total) # output trajectory (measured)
+
+x[:, 1] = sample_x_init() # random initial state
+for t in 2:T_total
+    x[:, t] = f_true(x[:, t-1], u[:, t-1]) + sample_v_true(1)
+end
+
+for t in 1:T_total
+    y[:, t] = g_true(x[:, t], u[:, t]) + sample_w_true(1)
 end
 
 # Split data into training and test data.
-u_training = u[:, 1:T]
-x_training = x[:, 1:T+1]
-y_training = y[:, 1:T]
+u_training = u[:, 1:T_train]
+x_training = x[:, 1:T_train]
+y_training = y[:, 1:T_train]
 
-u_test = u[:, T+1:end]
-x_test = x[:, T+1:end]
-y_test = y[:, T+1:end]
+u_test = u[:, T_train+1:end]
+x_test = x[:, T_train+1:end]
+y_test = y[:, T_train+1:end]
 
 # Plot data.
-# plot(Array(1:T_all), u[1,:], label="input", lw=2, legend=:topright);
-# plot!(Array(1:T_all), y[1,:], label="output", lw=2);
-# xlabel!("t");
-# ylabel!("u | y");
+plot()
+for i in 1:n_u
+    plot!(1:T_total, u[i, :], label="u_$i", lw=2, legend=:topright)
+end
+for i in 1:n_y
+    plot!(1:T_total, y[i, :], label="y_$i", lw=2)
+end
+xlabel!("t")
+ylabel!("u | y")
 
 # Learn models.
-particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, pdf_theta::Function, propose_theta::Function, theta_init, sample_x_init::Function)
-
+for i in 1:n_y
+    PMMH_samples = PMMHopt.particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_init, sample_v_theta, log_pdf_w_theta, log_pdf_theta, propose_theta, log_ratio_proposal_pdf, theta_init)
+end
 time_sampling = time() - sampling_timer
-
-# Set up OCP.

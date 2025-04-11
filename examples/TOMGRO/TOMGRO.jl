@@ -14,7 +14,7 @@ It models various aspects of plant development, including node formation, leaf a
 module TOMGRO
 using Plots
 
-export TOMGRO_state, TOMGRO_parameters, reset, step!, plot_history, radiation2ppfd
+export TOMGRO_parameters, TOMGRO_state, TOMGRO_input, reset, step!, plot_history, radiation2ppfd
 
 """
 ## Model Parameters
@@ -106,7 +106,21 @@ mutable struct TOMGRO_state
     W::Float64
     Wm::Float64
     Wf::Float64
-    history::Dict{String,Vector{Float64}}
+end
+
+"""
+## TOMGRO Input
+
+Holds the input of the TOMGRO simulation.
+
+- `Td`: temperature
+- `PPFDd`: photosynthetic photon flux density
+- `CO2`: CO₂ concentration
+"""
+mutable struct TOMGRO_input
+    Td::Float64
+    PPFDd::Float64
+    CO2::Float64
 end
 
 # Include dependencies

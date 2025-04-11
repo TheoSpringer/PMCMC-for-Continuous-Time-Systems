@@ -11,7 +11,7 @@ This module simulates the growth of plants based on environmental factors such a
 module SIMPLE
 using Plots
 
-export SIMPLE_state, SIMPLE_parameters, reset, step!, get_yield, plot_history
+export SIMPLE_parameters, SIMPLE_state, SIMPLE_input, reset, step!, get_yield, plot_history
 
 """
 ## Model Parameters
@@ -34,7 +34,6 @@ Holds the parameters of the SIMPLE simulation.
 """
 mutable struct SIMPLE_parameters
     tau_sum::Float64
-    HI::Float64
     Ia::Float64
     Ib::Float64
     theta_base::Float64
@@ -47,6 +46,7 @@ mutable struct SIMPLE_parameters
     Sco2::Float64
     Swater::Float64
     Rmax::Float64
+    HI::Float64
 end
 
 """
@@ -57,7 +57,6 @@ Returns the default SIMPLE model parameters (tomato crop, SunnySD cultivar).
 function default_parameters()
     return SIMPLE_parameters(
         2800,   # tau_sum
-        0.68,   # HI
         520,    # Ia
         400,    # Ib
         6.0,    # theta_base
@@ -69,7 +68,8 @@ function default_parameters()
         45.0,   # theta_ext
         0.07,   # Sco2
         2.5,    # Swater
-        0.95   # Rmax
+        0.95,   # Rmax
+        0.68   # HI
     )
 end
 
@@ -98,7 +98,23 @@ mutable struct SIMPLE_state
     mB::Float64
     tau::Float64
     I50B::Float64
-    history::Dict{String,Vector{Float64}}
+end
+
+"""
+## SIMPLE Input
+
+Holds the input of the SIMPLE simulation.
+
+- `theta`: temperature
+- `D`: relative level of drought (ARID index); see Woli (2012) 
+- `R`: radiation
+- `CO2`: atmospheric CO₂ concentration
+"""
+mutable struct SIMPLE_input
+    theta::Float64
+    D::Float64
+    R::Float64
+    CO2::Float64
 end
 
 # Include dependencies
