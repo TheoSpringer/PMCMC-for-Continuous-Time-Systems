@@ -1,7 +1,7 @@
 """
     particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Function, log_pdf_w::Function, sample_x_init::Function)
 
-Run a particle filter with ancestor sampling to approximate the log-marginal likelihood ``\\log p(y_{0:t_0-1} \\mid \\theta, \\{u_{0:t_0-1}\\})``.
+Run a particle filter to approximate the log-marginal likelihood ``\\log p(y_{0:t_0-1} \\mid \\theta, \\{u_{0:t_0-1}\\})``.
 
 # Arguments
 - `u`: training input trajectory
@@ -61,7 +61,7 @@ end
 """
     function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_init::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init; print_progress=true)
 
-Run particle marginal Metropolis-Hastings (PMMH) with ancestor sampling to obtain samples ``\\{\\theta, x_{0:t_0-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(\\theta, x_{0:t_0-1} \\mid \\mathbb{D}=\\{u_{0:t_0-1}, y_{0:t_0-1}\\})``.
+Run particle marginal Metropolis-Hastings (PMMH) to obtain samples ``\\{\\theta, x_{0:t_0-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(\\theta, x_{0:t_0-1} \\mid \\mathbb{D}=\\{u_{0:t_0-1}, y_{0:t_0-1}\\})``.
 
 # Arguments
 - `u`: training input trajectory
@@ -81,6 +81,11 @@ Run particle marginal Metropolis-Hastings (PMMH) with ancestor sampling to obtai
 - `log_ratio_proposal_pdf`: function that returns the logarithm of the ratio of proposal densities; has input arguments (theta_accepted, theta_prop)
 - `theta_init`: initial theta
 - `print_progress`: if set to true, the progress is printed
+
+# Returns
+- `PMMH_samples`: PMMH samples
+- `time_sampling`: sampling time
+- `acceptance_ratio`: acceptance ratio of the PMMH sampler
 
 ## References
 - Andrieu, Christophe, Arnaud Doucet, and Roman Holenstein. "Particle Markov chain Monte Carlo methods." Journal of the Royal Statistical Society Series B: Statistical Methodology 72.3 (2010): 269-342.
@@ -113,7 +118,7 @@ function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Fun
         println("### Started PMMH sampling")
     end
 
-    while accepted_samples <= K_total
+    while accepted_samples < K_total
         # Propose new parameters.
         n_proposals += 1
         theta_prop = propose_theta(theta)
@@ -170,8 +175,121 @@ function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Fun
         @printf("### PMMH sampling complete\nRuntime: %.2f s\nAcceptance ratio: %.2f %%\n", time_sampling, acceptance_ratio)
     end
 
-    return PMMH_samples, time_sampling, acceptance_ratio
+    return PMMH_samples, acceptance_ratio, time_sampling
 end
+
+"""
+    staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_init::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8)
+
+Run particle marginal Metropolis-Hastings (PMMH) with incremental data and adaptive proposal to obtain samples ``\\{\\theta, x_{0:t_0-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(\\theta, x_{0:t_0-1} \\mid \\mathbb{D}=\\{u_{0:t_0-1}, y_{0:t_0-1}\\})``.
+The number of data points used in the likelihood computation is gradually increased by a fixed chunk size. At each stage, the MMH sampler is run on the current data subset, and the proposal distribution is adapted based on the empirical covariance of the collected samples.
+
+# Arguments
+- `u`: training input trajectory
+- `y`: training output trajectory
+- `n_x`: number of states
+- `K`: number of models/scenarios to be sampled
+- `K_b`: length of the burn in period
+- `k_d`: number of models/scenarios to be skipped to decrease correlation (thinning)
+- `N`: number of particles
+- `f_theta`: state transition function parametrized by theta; has inputs (theta, x, u)
+- `g_theta`: measurement function parametrized by theta; has inputs (theta, x, u)
+- `sample_x_init`: function that returns a sample from the distribution over initial states; has no inputs
+- `sample_v_theta`: function that returns N samples from the process noise distribution parametrized by theta; has input (theta, N)
+- `log_pdf_w_theta`: function that returns the logarithm of the probability density function of the measurement noise parametrized by theta; has inputs (theta, w)
+- `log_pdf_theta`: function that returns the logarithm of the probability density function of theta (prior); has input (theta)
+- `theta_init`: initial theta
+- `proposal_cov_init`: initial covariance (matrix) for the multivariate normal proposal
+- `T_chunk`: number of data points added at each stage
+- `K_stage`: number of samples per stage
+- `alpha`: proposal scaling factor (scalar or vector; if a vector its i‐th element is used at stage i)
+- `print_progress`: if set to true, the progress is printed
+- `regularizer`: small constant added to the diagonal of the proposal covariance
+
+# Returns
+- `PMMH_samples`: final samples from full-data posterior
+- `all_samples`: an array of samples per stage
+- `acceptance_ratio`: vector containing the acceptance ratio of each stage
+"""
+function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_init::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8)
+    # Get number of parameters, etc.
+    n_theta = length(theta_init)
+    T = size(y, 2)
+
+    # Determine the number of stages (each stage adds T_chunk data points)
+    N_stages = ceil(Int, T / T_chunk)
+
+    # Initialize current parameter vector
+    theta = theta_init
+    proposal_cov = proposal_cov_init
+
+    # Allocate an array to store samples from each stage.
+    all_samples = Vector{Any}(undef, N_stages)
+    acceptance_ratio = zeros(N_stages)
+    PMMH_samples = Vector{PMMH_sample}(undef, K)
+
+    sampling_timer = time()
+
+    if print_progress
+        println("### Started staged PMMH sampling")
+    end
+
+    for i in 1:N_stages
+        # Select current data chunk - use data from 1 to T_i.
+        T_i = min(i * T_chunk, T)
+        u_i = u[:, 1:T_i]
+        y_i = y[:, 1:T_i]
+
+        # Define the proposal function as sampling from a multivariate normal.
+        propose_theta(theta) = rand(MvNormal(theta, proposal_cov))
+        log_ratio_proposal_pdf(theta_accepted, theta_prop) = 0
+
+        # Call the base PMMH sampler.
+        if i < N_stages
+            # For intermediate stages, sample K_stage samples without thinning.
+            PMMH_samples_stage, acceptance_ratio_stage = particle_MMH(u_i, y_i, n_x, K_stage, K_b, 0, N, f_theta, g_theta, sample_x_init, sample_v_theta, log_pdf_w_theta, log_pdf_theta, propose_theta, log_ratio_proposal_pdf, theta; print_progress=false)[1:2]
+        else
+            # In the final stage, sample K samples with thinning parameter k_d.
+            PMMH_samples_stage, acceptance_ratio_stage = particle_MMH(u_i, y_i, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_init, sample_v_theta, log_pdf_w_theta, log_pdf_theta, propose_theta, log_ratio_proposal_pdf, theta; print_progress=false)[1:2]
+        end
+
+        # Save stage samples and acceptance ratio.
+        all_samples[i] = PMMH_samples_stage
+        acceptance_ratio[i] = acceptance_ratio_stage
+
+        if i < N_stages
+            # Update proposal covariance based on the empirical covariance
+            Theta = zeros(n_theta, K_stage)
+            for j in 1:K_stage
+                Theta[:, j] = PMMH_samples_stage[j].theta
+            end
+
+            post_cov_theta = cov(transpose(Theta))
+            if isa(alpha, Number)
+                proposal_cov = alpha * post_cov_theta + regularizer * Matrix(I, n_theta, n_theta)
+            else
+                proposal_cov = alpha[i] * post_cov_theta + regularizer * Matrix(I, n_theta, n_theta)
+            end
+
+            # Update the current state to the last sample from the current stage.
+            theta = Theta[:, end]
+        else
+            PMMH_samples = PMMH_samples_stage
+        end
+        if print_progress
+            @printf("Stage %i/%i complete\nAcceptance ratio: %.2f %%\n", i, N_stages, acceptance_ratio_stage)
+        end
+    end
+
+    average_acceptance_ratio = mean(acceptance_ratio)
+    time_sampling = time() - sampling_timer
+    if print_progress
+        @printf("### Staged PMMH sampling complete\nRuntime: %.2f s\nAverage acceptance ratio: %.2f %%\n",
+            time_sampling, average_acceptance_ratio)
+    end
+    return PMMH_samples, all_samples, acceptance_ratio, time_sampling
+end
+
 
 """
     test_prediction(PMMH_samples::Vector{PMMH_sample}, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, u_test, y_test)

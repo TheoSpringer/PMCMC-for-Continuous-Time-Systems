@@ -18,10 +18,14 @@ Random.seed!(1)
 sampling_timer = time()
 
 # Learning parameters.
-K = 200 # number of PMMH samples per stage
-k_d = 50 # number of samples to be skipped to decrease correlation (thinning)
-K_b = 1000 # length of burn-in period for each stage
-N = 30 # number of particles of the particle filter
+K = 50 # number of PMMH samples per stage
+k_d = 5 # number of samples to be skipped to decrease correlation (thinning)
+K_b = 200 # length of burn-in period for each stage
+N = 50 # number of particles of the particle filter
+T_chunk = 5 # number of datapoints added at each stage
+K_stage = 500 # number of samples per stage
+alpha = 0.01 # scaling of the proposal covariance
+regularizer = 0 # regularizer for proposal covariance
 
 # Number of states, etc.
 n_x = 3 # number of states
@@ -81,16 +85,16 @@ theta_cov = Diagonal(theta_var) # covariance matrix of prior
 log_pdf_theta(theta) = -0.5 * sum((theta - theta_mean) .* (theta_cov \ (theta - theta_mean)), dims=1)
 
 # Initial proposal distribution.
-propose_theta(theta) = rand(MvNormal(theta, theta_cov))
-log_ratio_proposal_pdf(theta_accepted, theta_prop) = 1
-proposal_variance_scaling = 1.0 # scaling factor for the proposal variance
+log_ratio_proposal_pdf(theta_accepted, theta_prop) = 0
+proposal_variance_scaling = 1e-3 # scaling factor for the proposal variance
+propose_theta(theta) = rand(MvNormal(theta, proposal_variance_scaling * theta_cov))
 
 # Initial guess for model parameters.
 theta_init = theta_mean
 
 # Normally distributed initial state
 x_init_mean = [0, 0, 50] # mean
-x_init_var = Diagonal([1e-5, 1e-5, 10]) # variance
+x_init_var = Diagonal([1e-6, 1e-6, 1]) # variance
 sample_x_init() = rand(MvNormal(x_init_mean, x_init_var))
 
 # Parameters for data generation.
@@ -157,8 +161,4 @@ end
 xlabel!("t")
 ylabel!("u | y")
 
-# Learn models.
-for i in 1:n_y
-    PMMH_samples = PMMHopt.particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_init, sample_v_theta, log_pdf_w_theta, log_pdf_theta, propose_theta, log_ratio_proposal_pdf, theta_init)
-end
-time_sampling = time() - sampling_timer
+PMMH_samples = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_init, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer)
