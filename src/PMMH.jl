@@ -208,7 +208,6 @@ The number of data points used in the likelihood computation is gradually increa
 
 # Returns
 - `PMMH_samples`: final samples from full-data posterior
-- `all_samples`: an array of samples per stage
 - `acceptance_ratio`: vector containing the acceptance ratio of each stage
 """
 function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_init::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8)
@@ -224,7 +223,6 @@ function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Func
     proposal_cov = proposal_cov_init
 
     # Allocate an array to store samples from each stage.
-    all_samples = Vector{Any}(undef, N_stages)
     acceptance_ratio = zeros(N_stages)
     PMMH_samples = Vector{PMMH_sample}(undef, K)
 
@@ -254,7 +252,6 @@ function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Func
         end
 
         # Save stage samples and acceptance ratio.
-        all_samples[i] = PMMH_samples_stage
         acceptance_ratio[i] = acceptance_ratio_stage
 
         if i < N_stages
@@ -287,7 +284,7 @@ function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Func
         @printf("### Staged PMMH sampling complete\nRuntime: %.2f s\nAverage acceptance ratio: %.2f %%\n",
             time_sampling, average_acceptance_ratio)
     end
-    return PMMH_samples, all_samples, acceptance_ratio, time_sampling
+    return PMMH_samples, acceptance_ratio, time_sampling
 end
 
 
@@ -362,7 +359,7 @@ function test_prediction(PMMH_samples::Vector{PMMH_sample}, n_x, f_theta::Functi
     plot_predictions(y_test_sim, y_test; plot_percentiles=true)
 
     # Compute and print RMSE.
-    mean_rmse = sqrt(mean((y_test_sim .- repeat(y_test', 1, 1, K * k_n)) .^ 2))
+    mean_rmse = sqrt(mean((y_test_sim .- repeat(y_test, 1, 1, K * k_n)) .^ 2))
     @printf("Mean rmse: %.2f\n", mean_rmse)
 end
 
