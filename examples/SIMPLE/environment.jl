@@ -122,7 +122,9 @@ A constant high CO₂ concentration of 700 ppm is assumed reducing the number of
 """
 function f_theta(theta, x, u)
     # Unpack the parameters
-    parameters = SIMPLE_parameters(theta[1], theta[2], theta[3], theta[4], theta[5], theta[6], theta[7], theta[8], theta[9], theta[10], theta[11], theta[12], theta[13], 0.0)
+    # parameters = SIMPLE_parameters(theta[1], theta[2], theta[3], theta[4], theta[5], theta[6], theta[7], theta[8], theta[9], theta[10], theta[11], theta[12], theta[13], 0.0)
+
+    parameters = SIMPLE_parameters(theta[1], theta[2], theta[3], 6.0, 26.0, 1.00 * 1e-3, 100.0, 5.0, 32.0, 45.0, 0.07, 2.5, 0.95, 0.68)
 
     N = size(x, 2)
     x_next = zeros(size(x))

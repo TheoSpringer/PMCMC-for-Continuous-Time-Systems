@@ -18,13 +18,13 @@ Random.seed!(1)
 sampling_timer = time()
 
 # Learning parameters.
-K = 50 # number of PMMH samples per stage
-k_d = 5 # number of samples to be skipped to decrease correlation (thinning)
+K = Int(1e4) # number of PMMH samples in final stage
+k_d = 0 # number of samples to be skipped to decrease correlation (thinning)
 K_b = 200 # length of burn-in period for each stage
 N = 50 # number of particles of the particle filter
-T_chunk = 5 # number of datapoints added at each stage
-K_stage = 500 # number of samples per stage
-alpha = 0.01 # scaling of the proposal covariance
+T_chunk = 2 # number of datapoints added at each stage
+K_stage = Int(1e3) # number of samples per stage
+alpha = collect(range(1, stop=0.01, length=20)) # scaling of the proposal covariance
 regularizer = 0 # regularizer for proposal covariance
 
 # Number of states, etc.
@@ -49,36 +49,50 @@ log_pdf_w_theta(theta, w) = -0.5 * sum(w .* (R \ w), dims=1) # log pdf of measur
 
 # Prior for parameters.
 theta_mean = [
-    2800,   # tau_sum
-    520,    # Ia
-    400,    # Ib
+    2550,   # tau_sum
+    535,    # Ia
+    350,    # Ib
+]
+
+theta_var = [
+    62500,   # tau_sum
+    225,    # Ia
+    2500,    # Ib
+]
+
+#=
+theta_mean = [
+    2150,   # tau_sum
+    485,    # Ia
+    313,    # Ib
     6.0,    # theta_base
-    26.0,   # theta_opt
-    1.00 * 1e-3,    # RUE
+    27.0,   # theta_opt
+    1.14 * 1e-3,    # RUE
     100.0,  # Iheat
-    5.0,    # Iwater
-    32.0,   # theta_heat
-    45.0,   # theta_ext
-    0.07,   # Sco2
-    2.5,    # Swater
+    6.0,    # Iwater
+    33.0,   # theta_heat
+    46.0,   # theta_ext
+    0.06,   # Sco2
+    1.9,    # Swater
     0.95,   # Rmax
 ]
 
 theta_var = [
-    2800,   # tau_sum
-    520,    # Ia
-    400,    # Ib
-    6.0,    # theta_base
-    26.0,   # theta_opt
-    1.00 * 1e-3,    # RUE
-    100.0,  # Iheat
-    5.0,    # Iwater
-    32.0,   # theta_heat
-    45.0,   # theta_ext
-    0.07,   # Sco2
-    2.5,    # Swater
-    0.95,   # Rmax
+    205000,   # tau_sum
+    4725,    # Ia
+    2969,    # Ib
+    1.188,    # theta_base
+    0.250,   # theta_opt
+    0.108 * 1e-3,    # RUE
+    1e-6,  # Iheat
+    4.686,    # Iwater
+    0.750,   # theta_heat
+    4.688,   # theta_ext
+    6.750 * 1e-4,   # Sco2
+    0.743,    # Swater
+    0.100,   # Rmax
 ]
+=#
 
 # Log pdf of prior - normalizing factors are ommited as they cancel out in the acceptance ratio.
 theta_cov = Diagonal(theta_var) # covariance matrix of prior
@@ -98,11 +112,18 @@ x_init_var = Diagonal([1e-6, 1e-6, 1]) # variance
 sample_x_init() = rand(MvNormal(x_init_mean, x_init_var))
 
 # Parameters for data generation.
-T_train = 50 # number of days for training
-T_test = 50  # number of days used for testing (via forward simulation - see below)
+T_train = 40 # number of days for training
+T_test = 40  # number of days used for testing (via forward simulation - see below)
 T_total = T_train + T_test
 
 # Generate training data.
+theta_true = [
+    2800,   # tau_sum
+    520,    # Ia
+    400,    # Ib
+]
+
+#=
 theta_true = [
     2800,   # tau_sum
     520,    # Ia
@@ -118,6 +139,7 @@ theta_true = [
     2.5,    # Swater
     0.95,   # Rmax
 ]
+=#
 
 f_true(x, u) = f_theta(theta_true, x, u) # true state transition function
 g_true(x, u) = g_theta(theta_true, x, u) # true measurement function
@@ -161,7 +183,11 @@ end
 xlabel!("t")
 ylabel!("u | y")
 
-PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_init, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer)[1, 4]
+PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_init, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer)
 
 # Test the models with the test data by simulating it forward in time.
-PMMHopt.test_prediction(PMMH_samples, n_x, f_theta, g_theta, sample_v_theta, sample_w_theta, 10, u_test, y_test)
+PMMHopt.test_prediction(PMMH_samples, n_x, f_theta, g_theta, sample_v_theta, sample_w_theta, 1, u_test, y_test)
+
+# Plot autocorrelation of the PMMH samples.
+PMMHopt.plot_autocorrelation(PMMH_samples; max_lag=200)
+
