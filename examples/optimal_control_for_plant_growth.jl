@@ -2,6 +2,7 @@ using LinearAlgebra
 using Random
 using Distributions
 using Plots
+using StatsPlots
 
 include("SIMPLE/SIMPLE.jl")
 include("TOMGRO/TOMGRO.jl")
@@ -191,3 +192,8 @@ PMMHopt.test_prediction(PMMH_samples, n_x, f_theta, g_theta, sample_v_theta, sam
 # Plot autocorrelation of the PMMH samples.
 PMMHopt.plot_autocorrelation(PMMH_samples; max_lag=200)
 
+# Plot parameter trace.
+plot_parameter_trace(PMMH_samples)
+
+# Plot histogram.
+plot_parameter_pdf(PMMH_samples; n_bins=50)

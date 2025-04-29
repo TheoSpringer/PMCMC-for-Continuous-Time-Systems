@@ -8,7 +8,7 @@ using Plots
 using Printf
 using JuMP
 using Ipopt
-export PMMH_sample, particle_MMH, particle_filter, test_prediction, plot_predictions, plot_autocorrelation, epsilon, solve_PMMH_OCP, solve_PMMH_OCP_greedy_guarantees
+export PMMH_sample, particle_MMH, staged_PMMH, particle_filter, epsilon, solve_PMMH_OCP, solve_PMMH_OCP_greedy_guarantees, test_prediction, plot_predictions, plot_autocorrelation, plot_parameter_trace, plot_parameter_pdf
 
 # Struct for the samples of the PMMH algorithm
 mutable struct PMMH_sample
@@ -20,4 +20,5 @@ end
 
 include("PMMH.jl")
 include("optimal_control.jl")
+include("plotting.jl")
 end
