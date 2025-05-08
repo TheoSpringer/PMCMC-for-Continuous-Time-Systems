@@ -1,5 +1,5 @@
 """
-    particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Function, log_pdf_w::Function, sample_x_init::Function)
+    particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Function, log_pdf_w::Function, sample_x_0::Function)
 
 Run a particle filter to approximate the log-marginal likelihood ``\\log p(y_{0:t_0-1} \\mid \\theta, \\{u_{0:t_0-1}\\})``.
 
@@ -13,14 +13,14 @@ Run a particle filter to approximate the log-marginal likelihood ``\\log p(y_{0:
 - `sample_v`: function that returns N samples from the process noise distribution; has input (N)
 - `pdf_v`: probability density function of the process noise; has input (v)
 - `log_pdf_w`: function that returns the logarithm of the probability density function of the measurement noise; has input (w)
-- `sample_x_init`: function that returns a sample from the distribution over initial states; has no inputs
+- `sample_x_0`: function that returns a sample from the distribution over initial states; has no inputs
 
 # Returns
 - `x_pf`: state trajectories of particles
 - `w`: normalized weights of particles
 - `log_likelihood`: log-marginal likelihood estimate
 """
-function particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Function, log_pdf_w::Function, sample_x_init::Function)
+function particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Function, log_pdf_w::Function, sample_x_0::Function)
     # Initialize and pre-allocate.
     T = size(y, 2)
     w = Array{Float64}(undef, T, N)
@@ -31,7 +31,7 @@ function particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Funct
 
     # Sample initial states.
     for n in 1:N
-        x_pf[:, n, 1] .= sample_x_init()
+        x_pf[:, n, 1] .= sample_x_0()
     end
 
     # Particle filter.
@@ -59,7 +59,7 @@ end
 
 
 """
-    function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_init::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init; print_progress=true)
+    function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init; print_progress=true)
 
 Run particle marginal Metropolis-Hastings (PMMH) to obtain samples ``\\{\\theta, x_{0:t_0-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(\\theta, x_{0:t_0-1} \\mid \\mathbb{D}=\\{u_{0:t_0-1}, y_{0:t_0-1}\\})``.
 
@@ -73,7 +73,7 @@ Run particle marginal Metropolis-Hastings (PMMH) to obtain samples ``\\{\\theta,
 - `N`: number of particles
 - `f_theta`: state transition function parametrized by theta; has inputs (theta, x, u)
 - `g_theta`: measurement function parametrized by theta; has inputs (theta, x, u)
-- `sample_x_init`: function that returns a sample from the distribution over initial states; has no inputs
+- `sample_x_0`: function that returns a sample from the distribution over initial states; has no inputs
 - `sample_v_theta`: function that returns N samples from the process noise distribution parametrized by theta; has input (theta, N)
 - `log_pdf_w_theta`: function that returns the logarithm of the probability density function of the measurement noise parametrized by theta; has inputs (theta, w)
 - `log_pdf_theta`: function that returns the logarithm of the probability density function of theta (prior); has input (theta)
@@ -90,7 +90,7 @@ Run particle marginal Metropolis-Hastings (PMMH) to obtain samples ``\\{\\theta,
 ## References
 - Andrieu, Christophe, Arnaud Doucet, and Roman Holenstein. "Particle Markov chain Monte Carlo methods." Journal of the Royal Statistical Society Series B: Statistical Methodology 72.3 (2010): 269-342.
 """
-function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_init::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init; print_progress=true)
+function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init; print_progress=true)
     # Total number of samples to be generated
     K_total = K_b + 1 + (K - 1) * (k_d + 1)
 
@@ -102,7 +102,7 @@ function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Fun
     # Initialize and pre-allocate.
     PMMH_samples = Vector{PMMH_sample}(undef, K)
     for k in 1:K
-        PMMH_samples[k] = PMMH_sample(Array{Float64}(undef, n_theta), Array{Float64}(undef, n_x, N), Array{Float64}(undef, N), Array{Float64}(undef, n_u))
+        PMMH_samples[k] = PMMH_sample(Array{Float64}(undef, n_theta), Array{Float64}(undef, n_x, N), Array{Float64}(undef, N), Array{Float64}(undef, n_u), Array{Float64}(undef, n_x, N), Array{Float64}(undef, N))
     end
     accepted_samples = 0
     current_sample = 1
@@ -134,7 +134,7 @@ function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Fun
         log_pdf_w(w) = log_pdf_w_theta(theta_prop, w)
 
         # Run particle filter.
-        x_pf, w, log_likelihood_prop = particle_filter(u, y, n_x, N, f, g, sample_v, log_pdf_w, sample_x_init)
+        x_pf, w, log_likelihood_prop = particle_filter(u, y, n_x, N, f, g, sample_v, log_pdf_w, sample_x_0)
 
         # Compute acceptance probability.
         log_acceptance_ratio = log_likelihood_prop - log_likelihood + log_p_theta_prop - log_p_theta + log_ratio_proposal_pdf(theta, theta_prop)
@@ -152,6 +152,8 @@ function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Fun
                 PMMH_samples[current_sample].x_m1 .= x_pf[:, :, end]
                 PMMH_samples[current_sample].w_m1 .= w[end, :]
                 PMMH_samples[current_sample].u_m1 .= u[:, end]
+                PMMH_samples[current_sample].x_0 .= x_pf[:, :, 1]
+                PMMH_samples[current_sample].w_0 .= w[1, :]
                 current_sample += 1
             end
 
@@ -179,7 +181,7 @@ function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Fun
 end
 
 """
-    staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_init::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8)
+    staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8)
 
 Run particle marginal Metropolis-Hastings (PMMH) with incremental data and adaptive proposal to obtain samples ``\\{\\theta, x_{0:t_0-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(\\theta, x_{0:t_0-1} \\mid \\mathbb{D}=\\{u_{0:t_0-1}, y_{0:t_0-1}\\})``.
 The number of data points used in the likelihood computation is gradually increased by a fixed chunk size. At each stage, the MMH sampler is run on the current data subset, and the proposal distribution is adapted based on the empirical covariance of the collected samples.
@@ -194,7 +196,7 @@ The number of data points used in the likelihood computation is gradually increa
 - `N`: number of particles
 - `f_theta`: state transition function parametrized by theta; has inputs (theta, x, u)
 - `g_theta`: measurement function parametrized by theta; has inputs (theta, x, u)
-- `sample_x_init`: function that returns a sample from the distribution over initial states; has no inputs
+- `sample_x_0`: function that returns a sample from the distribution over initial states; has no inputs
 - `sample_v_theta`: function that returns N samples from the process noise distribution parametrized by theta; has input (theta, N)
 - `log_pdf_w_theta`: function that returns the logarithm of the probability density function of the measurement noise parametrized by theta; has inputs (theta, w)
 - `log_pdf_theta`: function that returns the logarithm of the probability density function of theta (prior); has input (theta)
@@ -210,7 +212,7 @@ The number of data points used in the likelihood computation is gradually increa
 - `PMMH_samples`: final samples from full-data posterior
 - `acceptance_ratio`: vector containing the acceptance ratio of each stage
 """
-function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_init::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8)
+function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8)
     # Get number of parameters, etc.
     n_theta = length(theta_init)
     T = size(y, 2)
@@ -245,10 +247,10 @@ function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Func
         # Call the base PMMH sampler.
         if i < N_stages
             # For intermediate stages, sample K_stage samples without thinning.
-            PMMH_samples_stage, acceptance_ratio_stage = particle_MMH(u_i, y_i, n_x, K_stage, K_b, 0, N, f_theta, g_theta, sample_x_init, sample_v_theta, log_pdf_w_theta, log_pdf_theta, propose_theta, log_ratio_proposal_pdf, theta; print_progress=false)[1:2]
+            PMMH_samples_stage, acceptance_ratio_stage = particle_MMH(u_i, y_i, n_x, K_stage, K_b, 0, N, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, propose_theta, log_ratio_proposal_pdf, theta; print_progress=false)[1:2]
         else
             # In the final stage, sample K samples with thinning parameter k_d.
-            PMMH_samples_stage, acceptance_ratio_stage = particle_MMH(u_i, y_i, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_init, sample_v_theta, log_pdf_w_theta, log_pdf_theta, propose_theta, log_ratio_proposal_pdf, theta; print_progress=false)[1:2]
+            PMMH_samples_stage, acceptance_ratio_stage = particle_MMH(u_i, y_i, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, propose_theta, log_ratio_proposal_pdf, theta; print_progress=false)[1:2]
         end
 
         # Save stage samples and acceptance ratio.
@@ -285,4 +287,53 @@ function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Func
             time_sampling, average_acceptance_ratio)
     end
     return PMMH_samples, acceptance_ratio, time_sampling
+end
+
+"""
+    compute_ess(PMMH_samples::Vector{PMMH_sample}; max_lag=100)
+
+Compute the effective sample size (ESS) for each parameter and state.
+
+# Arguments
+- `PMMH_samples`: PMMH samples
+- `max_lag`: maximum lag for autocorrelation estimation.
+
+# Returns
+- `ess`: vector of ESS estimates for all variables.
+"""
+function compute_ess(PMMH_samples::Vector{PMMH_sample}; max_lag=100)
+    # Get number of models.
+    K = size(PMMH_samples, 1)
+
+    # Get number of parameters of the PMMH samples.
+    number_of_variables = length(PMMH_samples[1].theta) + size(PMMH_samples[1].x_m1, 1)
+
+    # Fill matrix with the series of the parameters of the PMMH samples.
+    sample_matrix = Array{Float64}(undef, K, number_of_variables)
+    for i in 1:K
+        # Sample initial state.
+        star = sample(1:length(PMMH_samples[i].w_m1), Weights(PMMH_samples[i].w_m1))
+        x_m1 = PMMH_samples[i].x_m1[:, star]
+        sample_matrix[i, :] .= [PMMH_samples[i].theta; vec(x_m1)]
+    end
+
+    # Calculate the autocorrelation.
+    autocorrelation = autocor(sample_matrix, Array(0:max_lag); demean=true)
+    ess = zeros(number_of_variables)
+
+    for i in 1:number_of_variables
+        # Sum autocorrelation of i-th variable until first negative or max_lag.
+        autocorrelation_sum = 0.0
+        for lag in 1:max_lag
+            if autocorrelation[lag+1, i] < 0
+                break
+            end
+            autocorrelation_sum += autocorrelation[lag+1, i]
+        end
+
+        # Compute the effective sample size.
+        ess[i] = K / (1 + 2 * autocorrelation_sum)
+    end
+
+    return ess
 end

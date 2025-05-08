@@ -152,23 +152,23 @@ function solve_PMMH_OCP(PMMH_samples::Vector{PMMH_sample}, n_x, f_theta::Functio
     end
 
     # Determine initial guess for X and Y.
-    X_init = Array{Float64}(undef, n_x * K, H + 1) # initial guess for X
-    X_init[:, 1] .= x_vec_0
+    x_0 = Array{Float64}(undef, n_x * K, H + 1) # initial guess for X
+    x_0[:, 1] .= x_vec_0
     Y_init = Array{Float64}(undef, n_y * K, H) # initial guess for Y
     for k in 1:K
         # Get current model.
         f(x, u) = f_theta(PMMH_samples[k].theta, x, u)
         g(x, u) = g_theta(PMMH_samples[k].theta, x, u)
         for t in 1:H
-            X_init[n_x*(k-1)+1:n_x*k, t+1] = f(X_init[n_x*(k-1)+1:n_x*k, t], u_init[:, t]) + v_vec[:, t, k]
-            Y_init[n_y*(k-1)+1:n_y*k, t] = g(X_init[n_x*(k-1)+1:n_x*k, t], u_init[:, t]) + e_vec[:, t, k]
+            x_0[n_x*(k-1)+1:n_x*k, t+1] = f(x_0[n_x*(k-1)+1:n_x*k, t], u_init[:, t]) + v_vec[:, t, k]
+            Y_init[n_y*(k-1)+1:n_y*k, t] = g(x_0[n_x*(k-1)+1:n_x*k, t], u_init[:, t]) + e_vec[:, t, k]
         end
     end
 
     # Set up OCP.
     OCP = Model(Ipopt.Optimizer)
     @variable(OCP, U[i=1:n_u, j=1:H], start = u_init[i, j])
-    @variable(OCP, X[i=1:n_x*K, j=1:H+1], start = X_init[i, j])
+    @variable(OCP, X[i=1:n_x*K, j=1:H+1], start = x_0[i, j])
     @variable(OCP, Y[i=1:n_y*K, j=1:H], start = Y_init[i, j])
 
     # Set the initial state.

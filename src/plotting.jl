@@ -70,7 +70,7 @@ function test_prediction(PMMH_samples::Vector{PMMH_sample}, n_x, f_theta::Functi
 
     # Compute and print RMSE.
     mean_rmse = sqrt(mean((y_test_sim .- repeat(y_test, 1, 1, K * k_n)) .^ 2))
-    @printf("Mean rmse: %.2f\n", mean_rmse)
+    @printf("Mean RMSE: %.2f\n", mean_rmse)
 end
 
 """
@@ -126,15 +126,9 @@ function plot_predictions(y_pred, y_test; plot_percentiles=false, y_min=nothing,
             plot!(Array(0:T_pred-1), y_max', fillrange=maximum([y_pred_max; y_test']) * ones(T_pred), fillcolor=:red, alpha=0.35, label="constraints")
         end
 
-        # Add title, labels...
-        if 1 < n_y
-            title!("y_" * string(i) * ": predicted output vs. true output")
-            ylabel!("y_" * string(i))
-        else
-            title!("predicted output vs. true output")
-            ylabel!("y")
-        end
-        xlabel!("t")
+        title!("\$y_{$i}\$: predicted output vs. true output")
+        ylabel!("\$y_{$i}\$")
+        xlabel!("\$t\$")
         display(p)
     end
 end
@@ -148,16 +142,12 @@ Plot the autocorrelation function (ACF) of the PMMH samples. This might be helpf
 - `PMMH_samples`: PMMH samples
 - `max_lag`: maximum lag at which to calculate the ACF
 """
-function plot_autocorrelation(PMMH_samples::Vector{PMMH_sample}; max_lag=0)
+function plot_autocorrelation(PMMH_samples::Vector{PMMH_sample}; max_lag=100)
     # Get number of models.
     K = size(PMMH_samples, 1)
 
     # Get number of parameters of the PMMH samples.
     number_of_variables = length(PMMH_samples[1].theta) + size(PMMH_samples[1].x_m1, 1)
-
-    if max_lag == 0
-        max_lag = K - 1
-    end
 
     # Fill matrix with the series of the parameters of the PMMH samples.
     sample_matrix = Array{Float64}(undef, K, number_of_variables)
@@ -176,12 +166,12 @@ function plot_autocorrelation(PMMH_samples::Vector{PMMH_sample}; max_lag=0)
     for i in 1:number_of_variables
         if i == 1
             # Plot the ACF of the elements of theta.
-            plot!(Array(0:max_lag), autocorrelation[:, i], lc=:red, lw=2, label="theta")
+            plot!(Array(0:max_lag), autocorrelation[:, i], lc=:red, lw=2, label="\$\\theta\$")
         elseif 1 < i <= length(PMMH_samples[1].theta)
             plot!(Array(0:max_lag), autocorrelation[:, i], lc=:red, lw=2, label="")
         elseif i == length(PMMH_samples[1].theta) + 1
             # Plot the ACF of the elements of x_t-1.
-            plot!(Array(0:max_lag), autocorrelation[:, i], lc=:green, lw=2, label="x")
+            plot!(Array(0:max_lag), autocorrelation[:, i], lc=:green, lw=2, label="\$x(t-1)\$")
         elseif length(PMMH_samples[1].theta) + 1 < i
             plot!(Array(0:max_lag), autocorrelation[:, i], lc=:green, lw=2, label="")
         end
@@ -217,13 +207,13 @@ function plot_parameter_trace(PMMH_samples::Vector{PMMH_sample})
 
     # Plot the trace of the parameters.
     for i in 1:number_of_variables
-        plot(Array(0:K-1), sample_matrix[:, i])
+        p = plot(Array(0:K-1), sample_matrix[:, i], lw=2, legend=false)
         if i <= length(PMMH_samples[1].theta)
-            title!("Trace of theta_$i")
-            ylabel!("theta_$i")
+            title!("Trace of \$\\theta_{$i}\$")
+            ylabel!("\$\\theta_{$i}\$")
         else
-            title!("Trace of x_$(i-length(PMMH_samples[1].theta))")
-            ylabel!("x_$(i-length(PMMH_samples[1].theta))")
+            title!("Trace of \$x_{$(i-length(PMMH_samples[1].theta))}\$")
+            ylabel!("\$x_{$(i-length(PMMH_samples[1].theta))}(t-1)\$")
         end
         xlabel!("Iteration")
         display(p)
@@ -231,15 +221,17 @@ function plot_parameter_trace(PMMH_samples::Vector{PMMH_sample})
 end
 
 """
-    plot_parameter_pdf(PMMH_samples::Vector{PMMH_sample}; bins = 50)
+    plot_parameter_pdf(PMMH_samples::Vector{PMMH_sample}; bins = 50, prior_pdf::Union{Nothing,Vector{Tuple{Vector{Float64},Vector{Float64}}}}=nothing, true_values=nothing)
 
-Plots an histrogram for the parameters (empirical probability density fuction (PDF) estimate).
+Plots an histrogram (empirical probability density fuction (PDF) estimate) for the parameters and the initial state (t=0). If provided, overlays the prior density for each variable and the true value.
 
 # Arguments
 - `PMMH_samples`: PMMH samples
 - `bins`: number of bins to use for the histogram
+- `prior_pdf`: vector of prior density values for each parameter and latent initial state
+- `true_values`: true values for each parameter and latent initial state
 """
-function plot_parameter_pdf(PMMH_samples::Vector{PMMH_sample}; bins=50)
+function plot_parameter_pdf(PMMH_samples::Vector{PMMH_sample}; bins=50, prior_pdf::Union{Nothing,Vector{Tuple{Vector{Float64},Vector{Float64}}}}=nothing, true_values=nothing)
     # Get number of models.
     K = size(PMMH_samples, 1)
 
@@ -249,36 +241,41 @@ function plot_parameter_pdf(PMMH_samples::Vector{PMMH_sample}; bins=50)
     # Fill matrix with the series of the parameters of the PMMH samples.
     sample_matrix = Array{Float64}(undef, K, number_of_variables)
     for i in 1:K
-        # Sample initial state.
+        # Sample state at the last timestep of the training dataset.
+        #=
         star = sample(1:length(PMMH_samples[i].w_m1), Weights(PMMH_samples[i].w_m1))
         x_m1 = PMMH_samples[i].x_m1[:, star]
         sample_matrix[i, :] .= [PMMH_samples[i].theta; vec(x_m1)]
-    end
+        =#
 
-    # Plot the trace of the parameters.
-    for i in 1:number_of_variables
-        plot(Array(0:K-1), sample_matrix[:, i])
-        if i <= length(PMMH_samples[1].theta)
-            title!("Trace of theta_$i")
-            ylabel!("theta_$i")
-        else
-            title!("Trace of x_$(i-length(PMMH_samples[1].theta))")
-            ylabel!("x_$(i-length(PMMH_samples[1].theta))")
-        end
-        xlabel!("Iteration")
-        display(p)
+        # Sample state at the first timestep of the training dataset.
+        star = sample(1:length(PMMH_samples[i].w_0), Weights(PMMH_samples[i].w_0))
+        x_0 = PMMH_samples[i].x_0[:, star]
+        sample_matrix[i, :] .= [PMMH_samples[i].theta; vec(x_0)]
     end
 
     for i in 1:number_of_variables
-        histogram(sample_matrix[:, i], bins=bins, normalize=:pdf)
-        if i <= length(PMMH_samples[1].theta)
-            title!("Sample PDF of theta_$i")
-            xlabel!("theta_$i")
-        else
-            title!("Sample PDF of x_$(i-length(PMMH_samples[1].theta))")
-            xlabel!("x_$(i-length(PMMH_samples[1].theta))")
+        p = histogram(sample_matrix[:, i], bins=bins, normalize=:pdf, label="Posterior")
+
+        # Plot prior if provided
+        if !isnothing(prior_pdf) && i <= length(prior_pdf)
+            value, density = prior_pdf[i]
+            plot!(value, density, label="Prior", linestyle=:dash, lw=2)
         end
-        ylabel!("Sample PDF")
+
+        # Plot true value if provided
+        if !isnothing(true_values) && i <= length(true_values)
+            plot!([true_values[i]], seriestype=:vline, label="True", lw=2)
+        end
+
+        if i <= length(PMMH_samples[1].theta)
+            title!("Sample PDF of \$\\theta_{$i}\$")
+            xlabel!("\$\\theta_{$i}\$")
+        else
+            title!("Sample PDF of \$x_{$(i-length(PMMH_samples[1].theta))}(0)\$")
+            xlabel!("\$x_{$(i-length(PMMH_samples[1].theta))}\$")
+        end
+        ylabel!("Density")
         display(p)
     end
 end
