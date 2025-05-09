@@ -229,7 +229,7 @@ function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Fun
 end
 
 """
-    staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8)
+    staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8, n_theta_adapt=0, num_runs_theta_adapt=100, target_var=2.0, min_N=20)
 
 Run particle marginal Metropolis-Hastings (PMMH) with incremental data and adaptive proposal to obtain samples ``\\{\\theta, x_{0:t_0-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(\\theta, x_{0:t_0-1} \\mid \\mathbb{D}=\\{u_{0:t_0-1}, y_{0:t_0-1}\\})``.
 The number of data points used in the likelihood computation is gradually increased by a fixed chunk size. At each stage, the MMH sampler is run on the current data subset, and the proposal distribution is adapted based on the empirical covariance of the collected samples.
@@ -258,12 +258,13 @@ The number of data points used in the likelihood computation is gradually increa
 - `n_theta_adapt`: number of posterior samples used for the adaptation of the number of particles; adaptation is deactivated if set to 0 (default: 0)
 - `num_runs_theta_adapt`: number of PF runs for the adaptation of the number of particles (default: 100)
 - `target_var`: target variance for log-likelihood (default: 2.0)
+- `min_N`: minimum number of particles (default: 20)
 
 # Returns
 - `PMMH_samples`: final samples from full-data posterior
 - `acceptance_ratio`: vector containing the acceptance ratio of each stage
 """
-function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8, n_theta_adapt=0, num_runs_theta_adapt=100, target_var=2.0)
+function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8, n_theta_adapt=0, num_runs_theta_adapt=100, target_var=2.0, min_N=20)
     # Get number of parameters, etc.
     n_theta = length(theta_init)
     T = size(y, 2)
@@ -331,7 +332,8 @@ function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Func
                 # Draw a subset of posterior thetas
                 theta_subset = rand([s.theta for s in PMMH_samples_stage], min(n_theta_adapt, length(PMMH_samples_stage)))
 
-                N, log_likelihood_var_avg = adapt_N(u_i, y_i, n_x, N_init, theta_subset, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta; num_runs=num_runs_theta_adapt, target_var=target_var)
+                N_suggested, log_likelihood_var_avg = adapt_N(u_i, y_i, n_x, N_init, theta_subset, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta; num_runs=num_runs_theta_adapt, target_var=target_var)
+                N = max(min_N, N_suggested)
                 if print_progress
                     @printf("Adjusted N to %i (avg. log-likelihood variance ≈ %.2f)\n", N, log_likelihood_var_avg)
                 end
