@@ -24,7 +24,7 @@ sampling_timer = time()
 K = Int(1e4) # number of PMMH samples in final stage
 k_d = 0 # number of samples to be skipped to decrease correlation (thinning)
 K_b = 200 # length of burn-in period for each stage
-N = 50 # number of particles of the particle filter
+N_init = 200 # initial number of particles of the particle filter - will be adjusted later
 T_chunk = 2 # number of datapoints added at each stage
 K_stage = Int(1e3) # number of samples per stage
 alpha = collect(range(3, stop=0.1, length=20)) # scaling of the proposal covariance
@@ -134,9 +134,15 @@ end
 xlabel!("t")
 ylabel!("u | y")
 
+# Adjust number of particles for the particle filter. This requires a good estimate of the parameters theta.
+#=
+N_suggested = adapt_N(u, y, n_x, N_init, theta_true, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta; num_runs=100, target_var=2)[1]
+@printf("Suggested N: %i\n", N_suggested)
+=#
+
 # Run a staged PMMH sampler.
 # Aim for an acceptance ratio of around 20–30% for a random-walk proposal.
-PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer)
+PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer, n_theta_adapt=2)
 
 # Simulate the posterior models forward and compare to test data.
 # The predicted trajectories should track the true outputs well.
@@ -173,6 +179,7 @@ PMMHopt.plot_parameter_pdf(PMMH_samples; bins=50, prior_pdf=prior_pdf, true_valu
 # Optional: run multiple independent PMMH chains and compute the Gelman–Rubin statistic.
 # R̂ quantifies convergence by comparing within-chain to between-chain variance.
 # R̂ close to 1 (typically R̂ < 1.05) indicates good convergence across chains.
+#=
 M = 10 # number of independent chains
 PMMH_chains = Vector{Vector{PMMH_sample}}(undef, M)
 @threads for m in 1:M
@@ -182,3 +189,5 @@ end
 
 R_hat = PMMHopt.compute_gelman_rubin(PMMH_chains)
 @printf("Maximum R̂: %.2f\n", maximum(R_hat))
+=#
+

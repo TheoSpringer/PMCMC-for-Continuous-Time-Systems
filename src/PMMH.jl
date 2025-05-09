@@ -57,6 +57,57 @@ function particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Funct
     return x_pf, w, log_likelihood
 end
 
+"""
+    adapt_N(u, y, n_x, N, theta, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function; num_runs=100, target_var=2.0)
+
+Estimates the variance of the log-likelihood from repeated runs of the particle filter and returns a recommended new particle number N based on a target variance level.
+
+# Arguments
+- `u`: training input trajectory
+- `y`: training output trajectory
+- `n_x`: number of states
+- `K`: number of models/scenarios to be sampled
+- `K_b`: length of the burn in period
+- `k_d`: number of models/scenarios to be skipped to decrease correlation (thinning)
+- `N`: number of particles
+- `theta`: single parameter vector or vector of vectors (i.e., Vector{Vector{Float64}})
+- `f_theta`: state transition function parametrized by theta; has inputs (theta, x, u)
+- `g_theta`: measurement function parametrized by theta; has inputs (theta, x, u)
+- `sample_x_0`: function that returns a sample from the distribution over initial states; has no inputs
+- `sample_v_theta`: function that returns N samples from the process noise distribution parametrized by theta; has input (theta, N)
+- `log_pdf_w_theta`: function that returns the logarithm of the probability density function of the measurement noise parametrized by theta; has inputs (theta, w)
+- `num_runs`: number of PF runs for variance estimation (default: 100)
+- `target_var`: target variance for log-likelihood (default: 2.0)
+
+# Returns
+- `N_suggested`: recommended number of particles
+- 'log_likelihood_var_avg`: average variance of the log-likelihood
+"""
+function adapt_N(u, y, n_x, N, theta, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function; num_runs=100, target_var=2.0)
+    # Make sure theta is a list.
+    theta_list = theta isa AbstractVector{<:AbstractFloat} ? [theta] : theta
+    log_likelihood_vars = Float64[]
+
+    for theta in theta_list
+        # Update model.
+        f(x, u) = f_theta(theta, x, u)
+        g(x, u) = g_theta(theta, x, u)
+        sample_v(N) = sample_v_theta(theta, N)
+        log_pdf_w(w) = log_pdf_w_theta(theta, w)
+
+        # Compute variance of log-likelihood.
+        log_likelihoods = zeros(num_runs)
+        for i in 1:num_runs
+            _, _, log_likelihood = particle_filter(u, y, n_x, N, f, g, sample_v, log_pdf_w, sample_x_0)
+            log_likelihoods[i] = log_likelihood
+        end
+        push!(log_likelihood_vars, var(log_likelihoods, corrected=true))
+    end
+    log_likelihood_var_avg = mean(log_likelihood_vars)
+    N_suggested = max(1, ceil(Int, N * log_likelihood_var_avg / target_var))
+    return N_suggested, log_likelihood_var_avg
+end
+
 
 """
     function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init; print_progress=true)
@@ -67,9 +118,6 @@ Run particle marginal Metropolis-Hastings (PMMH) to obtain samples ``\\{\\theta,
 - `u`: training input trajectory
 - `y`: training output trajectory
 - `n_x`: number of states
-- `K`: number of models/scenarios to be sampled
-- `K_b`: length of the burn in period
-- `k_d`: number of models/scenarios to be skipped to decrease correlation (thinning)
 - `N`: number of particles
 - `f_theta`: state transition function parametrized by theta; has inputs (theta, x, u)
 - `g_theta`: measurement function parametrized by theta; has inputs (theta, x, u)
@@ -207,12 +255,15 @@ The number of data points used in the likelihood computation is gradually increa
 - `alpha`: proposal scaling factor (scalar or vector; if a vector its i‐th element is used at stage i)
 - `print_progress`: if set to true, the progress is printed
 - `regularizer`: small constant added to the diagonal of the proposal covariance
+- `n_theta_adapt`: number of posterior samples used for the adaptation of the number of particles; adaptation is deactivated if set to 0 (default: 0)
+- `num_runs_theta_adapt`: number of PF runs for the adaptation of the number of particles (default: 100)
+- `target_var`: target variance for log-likelihood (default: 2.0)
 
 # Returns
 - `PMMH_samples`: final samples from full-data posterior
 - `acceptance_ratio`: vector containing the acceptance ratio of each stage
 """
-function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8)
+function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8, n_theta_adapt=0, num_runs_theta_adapt=100, target_var=2.0)
     # Get number of parameters, etc.
     n_theta = length(theta_init)
     T = size(y, 2)
@@ -227,6 +278,11 @@ function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Func
     # Allocate an array to store samples from each stage.
     acceptance_ratio = zeros(N_stages)
     PMMH_samples = Vector{PMMH_sample}(undef, K)
+
+    # Store initial N in case of adaptation.
+    if n_theta_adapt > 0
+        N_init = N
+    end
 
     sampling_timer = time()
 
@@ -258,10 +314,7 @@ function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Func
 
         if i < N_stages
             # Update proposal covariance based on the empirical covariance
-            Theta = zeros(n_theta, K_stage)
-            for j in 1:K_stage
-                Theta[:, j] = PMMH_samples_stage[j].theta
-            end
+            Theta = hcat([s.theta for s in PMMH_samples_stage]...)
 
             post_cov_theta = cov(transpose(Theta))
             if isa(alpha, Number)
@@ -272,6 +325,17 @@ function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Func
 
             # Update the current state to the last sample from the current stage.
             theta = Theta[:, end]
+
+            # Adapt the number of particles for the next stage.
+            if n_theta_adapt > 0
+                # Draw a subset of posterior thetas
+                theta_subset = rand([s.theta for s in PMMH_samples_stage], min(n_theta_adapt, length(PMMH_samples_stage)))
+
+                N, log_likelihood_var_avg = adapt_N(u_i, y_i, n_x, N_init, theta_subset, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta; num_runs=num_runs_theta_adapt, target_var=target_var)
+                if print_progress
+                    @printf("Adjusted N to %i (avg. log-likelihood variance ≈ %.2f)\n", N, log_likelihood_var_avg)
+                end
+            end
         else
             PMMH_samples = PMMH_samples_stage
         end
