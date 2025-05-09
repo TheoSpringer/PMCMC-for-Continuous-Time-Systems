@@ -152,7 +152,7 @@ function plot_autocorrelation(PMMH_samples::Vector{PMMH_sample}; max_lag=100)
     # Fill matrix with the series of the parameters of the PMMH samples.
     sample_matrix = Array{Float64}(undef, K, number_of_variables)
     for i in 1:K
-        # Sample initial state.
+        # Sample state at the last timestep of the training dataset.
         star = sample(1:length(PMMH_samples[i].w_m1), Weights(PMMH_samples[i].w_m1))
         x_m1 = PMMH_samples[i].x_m1[:, star]
         sample_matrix[i, :] .= [PMMH_samples[i].theta; vec(x_m1)]
@@ -199,7 +199,7 @@ function plot_parameter_trace(PMMH_samples::Vector{PMMH_sample})
     # Fill matrix with the series of the parameters of the PMMH samples.
     sample_matrix = Array{Float64}(undef, K, number_of_variables)
     for i in 1:K
-        # Sample initial state.
+        # Sample state at the last timestep of the training dataset.
         star = sample(1:length(PMMH_samples[i].w_m1), Weights(PMMH_samples[i].w_m1))
         x_m1 = PMMH_samples[i].x_m1[:, star]
         sample_matrix[i, :] .= [PMMH_samples[i].theta; vec(x_m1)]
@@ -272,7 +272,7 @@ function plot_parameter_pdf(PMMH_samples::Vector{PMMH_sample}; bins=50, prior_pd
             title!("Sample PDF of \$\\theta_{$i}\$")
             xlabel!("\$\\theta_{$i}\$")
         else
-            title!("Sample PDF of \$x_{$(i-length(PMMH_samples[1].theta))}(0)\$")
+            title!("Sample PDF of \$x_{$(i-length(PMMH_samples[1].theta))}(t=0)\$")
             xlabel!("\$x_{$(i-length(PMMH_samples[1].theta))}\$")
         end
         ylabel!("Density")

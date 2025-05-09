@@ -4,6 +4,7 @@ using Distributions
 using Plots
 using StatsPlots
 using Printf
+using Base.Threads
 
 include("SIMPLE/SIMPLE.jl")
 include("TOMGRO/TOMGRO.jl")
@@ -66,40 +67,6 @@ theta_var = [
 theta_cov = Diagonal(theta_var) # covariance matrix of prior
 log_pdf_theta(theta) = -0.5 * sum((theta - theta_mean) .* (theta_cov \ (theta - theta_mean)), dims=1)
 
-#=
-theta_mean = [
-    2150,   # tau_sum
-    485,    # Ia
-    313,    # Ib
-    6.0,    # theta_base
-    27.0,   # theta_opt
-    1.14 * 1e-3,    # RUE
-    100.0,  # Iheat
-    6.0,    # Iwater
-    33.0,   # theta_heat
-    46.0,   # theta_ext
-    0.06,   # Sco2
-    1.9,    # Swater
-    0.95,   # Rmax
-]
-
-theta_var = [
-    205000,   # tau_sum
-    4725,    # Ia
-    2969,    # Ib
-    1.188,    # theta_base
-    0.250,   # theta_opt
-    0.108 * 1e-3,    # RUE
-    1e-6,  # Iheat
-    4.686,    # Iwater
-    0.750,   # theta_heat
-    4.688,   # theta_ext
-    6.750 * 1e-4,   # Sco2
-    0.743,    # Swater
-    0.100,   # Rmax
-]
-=#
-
 # Initial proposal distribution.
 log_ratio_proposal_pdf(theta_accepted, theta_prop) = 0
 proposal_variance_scaling = 1e-3 # scaling factor for the proposal variance
@@ -124,24 +91,6 @@ theta_true = [
     520,    # Ia
     400,    # Ib
 ]
-
-#=
-theta_true = [
-    2800,   # tau_sum
-    520,    # Ia
-    400,    # Ib
-    6.0,    # theta_base
-    26.0,   # theta_opt
-    1.00 * 1e-3,    # RUE
-    100.0,  # Iheat
-    5.0,    # Iwater
-    32.0,   # theta_heat
-    45.0,   # theta_ext
-    0.07,   # Sco2
-    2.5,    # Swater
-    0.95,   # Rmax
-]
-=#
 
 f_true(x, u) = f_theta(theta_true, x, u) # true state transition function
 g_true(x, u) = g_theta(theta_true, x, u) # true measurement function
@@ -185,23 +134,29 @@ end
 xlabel!("t")
 ylabel!("u | y")
 
-# Run a staged PMMH sampler. The acceptance ratio should be around 25 % for a random walk proposal.
+# Run a staged PMMH sampler.
+# Aim for an acceptance ratio of around 20–30% for a random-walk proposal.
 PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer)
 
-# Test the models with the test data by simulating it forward in time. The predictions should fit the test data well.
+# Simulate the posterior models forward and compare to test data.
+# The predicted trajectories should track the true outputs well.
 PMMHopt.test_prediction(PMMH_samples, n_x, f_theta, g_theta, sample_v_theta, sample_w_theta, 1, u_test, y_test)
 
-# Plot autocorrelation of the PMMH samples. The ACF should ideally decay quickly. With right thinning, the autocorrelation should be close to 0 also for small lags.
+# Plot the autocorrelation function (ACF) of the samples.
+# A well-mixed chain will show fast decay of autocorrelation. After thinning, the ACF should be near zero even at small lags.
 PMMHopt.plot_autocorrelation(PMMH_samples; max_lag=200)
 
-# Print effective sample size (ESS) of the PMMH samples. With right thinning, ESS should be close to K.
+# Compute the effective sample size (ESS).
+# The ESS indicates how many effectively independent samples were drawn. Ideally, after thinning, ESS should approach K.
 ess = PMMHopt.compute_ess(PMMH_samples; max_lag=200)
 @printf("Minimum ESS: %.1f\n", minimum(ess))
 
-# Plot parameter trace. After the burn in is removed the trace should not have any trends and should be stationary. Also, the step size should seem resonable.
+# Plot the parameter and latent state trace.
+# The trace should appear stationary and show no long-term trends after burn-in. Jump sizes should look reasonable.
 PMMHopt.plot_parameter_trace(PMMH_samples)
 
-# Plot histogram and the priors. If the data is informative, the posterior should contract with respect to the prior to the true value.
+# Plot the posterior histogram with overlaid priors and true values (if known).
+# If the data is informative, the posterior should be tighter than the prior and centered near the true value.
 prior_pdf = Vector{Tuple{Vector{Float64},Vector{Float64}}}()
 for i in 1:length(theta_mean)
     prior = Normal(theta_mean[i], sqrt(theta_var[i]))
@@ -214,3 +169,16 @@ for i in 1:length(x_0_mean)
     push!(prior_pdf, (values, pdf(prior, values)))
 end
 PMMHopt.plot_parameter_pdf(PMMH_samples; bins=50, prior_pdf=prior_pdf, true_values=[theta_true; x_training[:, 1]])
+
+# Optional: run multiple independent PMMH chains and compute the Gelman–Rubin statistic.
+# R̂ quantifies convergence by comparing within-chain to between-chain variance.
+# R̂ close to 1 (typically R̂ < 1.05) indicates good convergence across chains.
+M = 10 # number of independent chains
+PMMH_chains = Vector{Vector{PMMH_sample}}(undef, M)
+@threads for m in 1:M
+    theta_init = rand(MvNormal(theta_mean, Diagonal(theta_var)))
+    PMMH_chains[m] = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer)[1]
+end
+
+R_hat = PMMHopt.compute_gelman_rubin(PMMH_chains)
+@printf("Maximum R̂: %.2f\n", maximum(R_hat))

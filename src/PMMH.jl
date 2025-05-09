@@ -337,3 +337,57 @@ function compute_ess(PMMH_samples::Vector{PMMH_sample}; max_lag=100)
 
     return ess
 end
+
+"""
+    compute_gelman_rubin(PMMH_chains::Vector{Vector{PMMH_sample}})
+
+Compute the Gelman–Rubin statistic for each parameter and latent state from a vector of PMMH chains.
+
+# Arguments
+- `PMMH_chains`: vector of chains, where each chain is a vector of PMMH samples
+
+# Returns
+- `R_hat`: vector of R̂ values, one for each variable
+"""
+function compute_gelman_rubin(PMMH_chains::Vector{Vector{PMMH_sample}})
+    M = length(PMMH_chains) # Number of chains
+    K = length(PMMH_chains[1]) # Number of samples per chain
+
+    # Get number of parameters of the PMMH samples.
+    number_of_variables = length(PMMH_chains[1][1].theta) + size(PMMH_chains[1][1].x_m1, 1)
+
+    # Extract samples from each chain
+    sample_matrices_chains = Array{Float64}[]
+    for chain in PMMH_chains
+        sample_matrix = Array{Float64}(undef, K, number_of_variables)
+
+        for i in 1:K
+            # Sample state at the last timestep of the training dataset.
+            star = sample(1:length(chain[i].w_m1), Weights(chain[i].w_m1))
+            x_m1 = chain[i].x_m1[:, star]
+            sample_matrix[i, :] .= [chain[i].theta; vec(x_m1)]
+        end
+
+        push!(sample_matrices_chains, sample_matrix)
+    end
+
+    # Compute means and variances
+    means = zeros(M, number_of_variables)
+    variances = zeros(M, number_of_variables)
+    for m in 1:M
+        means[m, :] .= vec(mean(sample_matrices_chains[m], dims=1))
+        variances[m, :] .= vec(var(sample_matrices_chains[m], dims=1, corrected=true))
+    end
+
+    # Between-chain and within-chain variance
+    mean_overall = mean(means, dims=1)
+    B = K / (M - 1) .* sum((means .- mean_overall) .^ 2, dims=1)
+    W = mean(variances, dims=1)
+
+    # Estimated marginal posterior variance and R̂
+    V_hat = (K - 1) / K .* W .+ B / K
+    R_hat = sqrt.(V_hat ./ W)
+
+    # Clip from below at 1.0 for numerical consistency
+    return max.(R_hat, 1.0)
+end
