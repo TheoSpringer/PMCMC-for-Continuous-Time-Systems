@@ -148,6 +148,7 @@ N_suggested = adapt_N(u, y, n_x, N_init, theta_true, f_theta, g_theta, sample_x_
 # Aim for an acceptance ratio of around 20–30% for a random-walk proposal.
 PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
 
+# In case the uncertainty about the initial state is large and/or the process noise is small, it may be beneficial to use a blocked PMMH sampler.
 # proposal_cov_init = Diagonal(vcat(theta_var, x_0_var)) # initial proposal covariance for theta and x_0
 # PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH_blocked(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_v_theta, log_pdf_w_theta, log_pdf_theta, log_pdf_x_0, theta_init, x_0_init, proposal_cov_init, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
 
@@ -161,8 +162,9 @@ PMMHopt.plot_autocorrelation(PMMH_samples; max_lag=200)
 
 # Compute the effective sample size (ESS).
 # The ESS indicates how many effectively independent samples were drawn. Ideally, after thinning, ESS should approach K.
+# The goal of tuning is to maximize the ESS per second.
 ess = PMMHopt.compute_ess(PMMH_samples; max_lag=200)
-@printf("Minimum ESS: %.1f\n", minimum(ess))
+@printf("Minimum ESS: %.1f (= %.2f / s)\n", minimum(ess), minimum(ess) / time_sampling)
 
 # Plot the parameter and latent state trace.
 # The trace should appear stationary and show no long-term trends after burn-in. Jump sizes should look reasonable.
