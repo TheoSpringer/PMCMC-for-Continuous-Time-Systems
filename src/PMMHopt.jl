@@ -3,6 +3,7 @@ module PMMHopt
 using LinearAlgebra
 using Statistics
 using Distributions
+using Random
 using StatsBase
 using Base.Threads
 using Plots

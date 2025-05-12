@@ -147,10 +147,10 @@ function plot_autocorrelation(PMMH_samples::Vector{PMMH_sample}; max_lag=100)
     K = size(PMMH_samples, 1)
 
     # Get number of parameters of the PMMH samples.
-    number_of_variables = length(PMMH_samples[1].theta) + size(PMMH_samples[1].x_m1, 1)
+    n_variables = length(PMMH_samples[1].theta) + size(PMMH_samples[1].x_m1, 1)
 
     # Fill matrix with the series of the parameters of the PMMH samples.
-    sample_matrix = Array{Float64}(undef, K, number_of_variables)
+    sample_matrix = Array{Float64}(undef, K, n_variables)
     for i in 1:K
         # Sample state at the last timestep of the training dataset.
         star = sample(1:length(PMMH_samples[i].w_m1), Weights(PMMH_samples[i].w_m1))
@@ -163,7 +163,7 @@ function plot_autocorrelation(PMMH_samples::Vector{PMMH_sample}; max_lag=100)
 
     # Plot the ACF.
     p = plot(yticks=-1:0.1:1)
-    for i in 1:number_of_variables
+    for i in 1:n_variables
         if i == 1
             # Plot the ACF of the elements of theta.
             plot!(Array(0:max_lag), autocorrelation[:, i], lc=:red, lw=2, label="\$\\theta\$")
@@ -194,10 +194,10 @@ function plot_parameter_trace(PMMH_samples::Vector{PMMH_sample})
     K = size(PMMH_samples, 1)
 
     # Get number of parameters of the PMMH samples.
-    number_of_variables = length(PMMH_samples[1].theta) + size(PMMH_samples[1].x_m1, 1)
+    n_variables = length(PMMH_samples[1].theta) + size(PMMH_samples[1].x_m1, 1)
 
     # Fill matrix with the series of the parameters of the PMMH samples.
-    sample_matrix = Array{Float64}(undef, K, number_of_variables)
+    sample_matrix = Array{Float64}(undef, K, n_variables)
     for i in 1:K
         # Sample state at the last timestep of the training dataset.
         star = sample(1:length(PMMH_samples[i].w_m1), Weights(PMMH_samples[i].w_m1))
@@ -206,7 +206,7 @@ function plot_parameter_trace(PMMH_samples::Vector{PMMH_sample})
     end
 
     # Plot the trace of the parameters.
-    for i in 1:number_of_variables
+    for i in 1:n_variables
         p = plot(Array(0:K-1), sample_matrix[:, i], lw=2, legend=false)
         if i <= length(PMMH_samples[1].theta)
             title!("Trace of \$\\theta_{$i}\$")
@@ -236,10 +236,10 @@ function plot_parameter_pdf(PMMH_samples::Vector{PMMH_sample}; bins=50, prior_pd
     K = size(PMMH_samples, 1)
 
     # Get number of parameters of the PMMH samples.
-    number_of_variables = length(PMMH_samples[1].theta) + size(PMMH_samples[1].x_m1, 1)
+    n_variables = length(PMMH_samples[1].theta) + size(PMMH_samples[1].x_m1, 1)
 
     # Fill matrix with the series of the parameters of the PMMH samples.
-    sample_matrix = Array{Float64}(undef, K, number_of_variables)
+    sample_matrix = Array{Float64}(undef, K, n_variables)
     for i in 1:K
         # Sample state at the last timestep of the training dataset.
         #=
@@ -254,7 +254,7 @@ function plot_parameter_pdf(PMMH_samples::Vector{PMMH_sample}; bins=50, prior_pd
         sample_matrix[i, :] .= [PMMH_samples[i].theta; vec(x_0)]
     end
 
-    for i in 1:number_of_variables
+    for i in 1:n_variables
         p = histogram(sample_matrix[:, i], bins=bins, normalize=:pdf, label="Posterior")
 
         # Plot prior if provided

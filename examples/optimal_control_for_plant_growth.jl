@@ -79,6 +79,10 @@ theta_init = theta_mean
 x_0_mean = [0, 0, 50] # mean
 x_0_var = [1e-6, 1e-6, 1] # variance
 sample_x_0() = rand(MvNormal(x_0_mean, Diagonal(x_0_var)))
+log_pdf_x_0(x_0) = -0.5 * sum((x_0 - x_0_mean) .* (Diagonal(x_0_var) \ (x_0 - x_0_mean)), dims=1)
+
+# Initial guess for initial state. Only relevant for blocked PMMH.
+x_0_init = x_0_mean
 
 # Parameters for data generation.
 T_train = 40 # number of days for training
@@ -142,7 +146,10 @@ N_suggested = adapt_N(u, y, n_x, N_init, theta_true, f_theta, g_theta, sample_x_
 
 # Run a staged PMMH sampler.
 # Aim for an acceptance ratio of around 20–30% for a random-walk proposal.
-PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer, n_theta_adapt=2)
+PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
+
+# proposal_cov_init = Diagonal(vcat(theta_var, x_0_var)) # initial proposal covariance for theta and x_0
+# PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH_blocked(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_v_theta, log_pdf_w_theta, log_pdf_theta, log_pdf_x_0, theta_init, x_0_init, proposal_cov_init, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
 
 # Simulate the posterior models forward and compare to test data.
 # The predicted trajectories should track the true outputs well.
