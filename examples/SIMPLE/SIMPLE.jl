@@ -15,12 +15,10 @@ export SIMPLE_parameters, SIMPLE_state, SIMPLE_input, reset, step!, get_yield, p
 
 """
 ## Model Parameters
-Holds the parameters of the SIMPLE simulation.
+Holds the parameters of the SIMPLE simulation. Compared to the original paper, the I50B parameter is not included as it describes the initial state of the simulation and is not a parameter of the dynamics.
 
 - `tau_sum`: cumulative temperature requirement from sowing to maturity
-- `HI`: potential harvest index
 - `Ia`: cumulative temperature requirement for leaf area development to intercept 50 % of radiation
-- `Ib`: cumulative temperature till maturity to reach 50 % radiation interception due to leaf senescence
 - `theta_base`: base temperature for phenology development and growth
 - `theta_opt`: optimal temperature for biomass growth
 - `RUE`: Radiation use efficiency
@@ -31,11 +29,11 @@ Holds the parameters of the SIMPLE simulation.
 - `Sco2`: relative increase in RUE per ppm elevated CO2 above 350 ppm
 - `Swater`: sensitivity of RUE to drought stress
 - `Rmax`: maximum fraction of radiation interception
+- `HI`: harvest index
 """
 mutable struct SIMPLE_parameters
     tau_sum::Float64
     Ia::Float64
-    Ib::Float64
     theta_base::Float64
     theta_opt::Float64
     RUE::Float64
@@ -56,9 +54,8 @@ Returns the default SIMPLE model parameters (tomato crop, SunnySD cultivar).
 """
 function default_parameters()
     return SIMPLE_parameters(
-        2800,   # tau_sum
-        520,    # Ia
-        400,    # Ib
+        2800.0,   # tau_sum
+        520.0,    # Ia
         6.0,    # theta_base
         26.0,   # theta_opt
         1.00 * 1e-3,    # RUE
@@ -83,7 +80,7 @@ Initial values for model state variables.
 """
 const mB_init = 0.0
 const tau_init = 0.0
-const I50B_init = 50.0
+const I50B_init = 400.0 # I50B parameter in paper
 
 """
 ## SIMPLE State

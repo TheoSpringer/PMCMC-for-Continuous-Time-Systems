@@ -27,8 +27,8 @@ K_b = 200 # length of burn-in period for each stage
 N_init = 200 # initial number of particles of the particle filter - will be adjusted later
 T_chunk = 2 # number of datapoints added at each stage
 K_stage = Int(1e3) # number of samples per stage
-alpha = collect(range(3, stop=0.1, length=20)) # scaling of the proposal covariance
-regularizer = 0 # regularizer for proposal covariance
+alpha = collect(range(5, stop=0.1, length=20)) # scaling of the proposal covariance
+regularizer = 0.0 # regularizer for proposal covariance
 
 # Number of states, etc.
 n_x = 3 # number of states
@@ -52,15 +52,13 @@ log_pdf_w_theta(theta, w) = -0.5 * sum(w .* (R \ w), dims=1) # log pdf of measur
 
 # Prior for parameters.
 theta_mean = [
-    2550,   # tau_sum
-    535,    # Ia
-    350,    # Ib
+    2550.0,   # tau_sum
+    535.0    # Ia
 ]
 
 theta_var = [
-    62500,   # tau_sum
-    225,    # Ia
-    2500,    # Ib
+    62500.0,   # tau_sum
+    225.0    # Ia
 ]
 
 # Log pdf of prior - normalizing factors are ommited as they cancel out in the acceptance ratio.
@@ -76,8 +74,8 @@ propose_theta(theta) = rand(MvNormal(theta, proposal_variance_scaling * theta_co
 theta_init = theta_mean
 
 # Normally distributed initial state
-x_0_mean = [0, 0, 50] # mean
-x_0_var = [1e-6, 1e-6, 1] # variance
+x_0_mean = [0, 0, 350] # mean
+x_0_var = [1e-3, 1e-3, 12500] # variance
 sample_x_0() = rand(MvNormal(x_0_mean, Diagonal(x_0_var)))
 log_pdf_x_0(x_0) = -0.5 * sum((x_0 - x_0_mean) .* (Diagonal(x_0_var) \ (x_0 - x_0_mean)), dims=1)
 
@@ -91,10 +89,11 @@ T_total = T_train + T_test
 
 # Generate training data.
 theta_true = [
-    2800,   # tau_sum
-    520,    # Ia
-    400,    # Ib
+    2800.0,   # tau_sum
+    520.0    # Ia
 ]
+
+x_0_true = [0.0, 0.0, 400.0]
 
 f_true(x, u) = f_theta(theta_true, x, u) # true state transition function
 g_true(x, u) = g_theta(theta_true, x, u) # true measurement function
@@ -109,7 +108,7 @@ u = [fill(25.0, T_total)'; fill(0.0, T_total)'; fill(25.0, T_total)']
 x = Array{Float64}(undef, n_x, T_total) # true latent state trajectory
 y = Array{Float64}(undef, n_y, T_total) # output trajectory (measured)
 
-x[:, 1] = sample_x_0() # random initial state
+x[:, 1] = x_0_true
 for t in 2:T_total
     x[:, t] = f_true(x[:, t-1], u[:, t-1]) + sample_v_true(1)
 end
@@ -200,3 +199,5 @@ R_hat = PMMHopt.compute_gelman_rubin(PMMH_chains)
 @printf("Maximum R̂: %.2f\n", maximum(R_hat))
 =#
 
+# Start optimization.
+# PMMHopt.solve_PMMH_OCP(PMMH_samples, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, H, J::Function, h_scenario::Function, h_u::Function; J_u=false, x_vec_0=nothing, v_vec=nothing, w_vec=nothing, u_init=nothing, K_pre_solve=0, solver_opts=nothing, print_progress=true)

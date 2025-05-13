@@ -1,5 +1,5 @@
 """
-    reset(parameters=nothing)
+    reset(parameters::Union{Nothing,TOMGRO_parameters}=nothing)
 
 Resets the TOMGRO simulation environment to its initial state.
 
@@ -10,7 +10,7 @@ Resets the TOMGRO simulation environment to its initial state.
 - TOMGRO parameters
 - TOMGRO state
 """
-function reset(parameters=nothing)
+function reset(parameters::Union{Nothing,TOMGRO_parameters}=nothing)
     if parameters === nothing
         parameters = default_parameters()
     end

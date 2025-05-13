@@ -1,5 +1,5 @@
 """
-    particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Function, log_pdf_w::Function, sample_x_0::Function)
+    particle_filter(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:AbstractFloat}, n_x::Int, N::Int, f::Function, g::Function, sample_v::Function, log_pdf_w::Function, sample_x_0::Function)
 
 Run a particle filter to approximate the log-marginal likelihood ``\\log p(y_{0:t_0-1} \\mid \\theta, \\{u_{0:t_0-1}\\})``.
 
@@ -20,7 +20,7 @@ Run a particle filter to approximate the log-marginal likelihood ``\\log p(y_{0:
 - `w`: normalized weights of particles
 - `log_likelihood`: log-marginal likelihood estimate
 """
-function particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Function, log_pdf_w::Function, sample_x_0::Function)
+function particle_filter(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:AbstractFloat}, n_x::Int, N::Int, f::Function, g::Function, sample_v::Function, log_pdf_w::Function, sample_x_0::Function)
     # Initialize and pre-allocate.
     T = size(y, 2)
     w = Array{Float64}(undef, T, N)
@@ -58,7 +58,7 @@ function particle_filter(u, y, n_x, N, f::Function, g::Function, sample_v::Funct
 end
 
 """
-    adapt_N(PMMH_samples::Vector{PMMH_sample}, u, y, n_x, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function; K_adapt=1, num_runs=100, target_var=2.0)
+    adapt_N(PMMH_samples::Vector{PMMH_sample}, u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:AbstractFloat}, n_x::Int, N::Int, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function; K_adapt::Int=1, num_runs::Int=100, target_var::AbstractFloat=2.0)
 
 Estimates the variance of the log-likelihood from repeated runs of the particle filter and returns a recommended new particle number N based on a target variance level.
 
@@ -84,7 +84,7 @@ Estimates the variance of the log-likelihood from repeated runs of the particle 
 - `N_suggested`: recommended number of particles
 - 'log_likelihood_var_avg`: average variance of the log-likelihood
 """
-function adapt_N(PMMH_samples::Vector{PMMH_sample}, u, y, n_x, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function; K_adapt=1, num_runs=100, target_var=2.0)
+function adapt_N(PMMH_samples::Vector{PMMH_sample}, u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:AbstractFloat}, n_x::Int, N::Int, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function; K_adapt::Int=1, num_runs::Int=100, target_var::AbstractFloat=2.0)
     K = size(PMMH_samples, 1)
     if K_adapt > K
         warning("K_adapt is larger than the provided number of samples K. Using K instead.")
@@ -116,7 +116,7 @@ end
 
 
 """
-    function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init; print_progress=true)
+    particle_MMH(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:AbstractFloat}, n_x::Int, K::Int, K_b::Int, k_d::Int, N::Int, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init::AbstractVector{<:AbstractFloat}; print_progress=true)
 
 Run particle marginal Metropolis-Hastings (PMMH) to obtain samples ``\\{\\theta, x_{0:t_0-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(\\theta, x_{0:t_0-1} \\mid \\mathbb{D}=\\{u_{0:t_0-1}, y_{0:t_0-1}\\})``.
 
@@ -147,7 +147,7 @@ Run particle marginal Metropolis-Hastings (PMMH) to obtain samples ``\\{\\theta,
 ## References
 - Andrieu, Christophe, Arnaud Doucet, and Roman Holenstein. "Particle Markov chain Monte Carlo methods." Journal of the Royal Statistical Society Series B: Statistical Methodology 72.3 (2010): 269-342.
 """
-function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init; print_progress=true)
+function particle_MMH(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:AbstractFloat}, n_x::Int, K::Int, K_b::Int, k_d::Int, N::Int, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init::AbstractVector{<:AbstractFloat}; print_progress=true)
     # Total number of samples to be generated
     K_total = K_b + 1 + (K - 1) * (k_d + 1)
 
@@ -238,7 +238,7 @@ function particle_MMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Fun
 end
 
 """
-    staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8, K_adapt=0, num_runs_N_adapt=100, target_var=2.0, min_N=20)
+    staged_PMMH(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:AbstractFloat}, n_x::Int, K::Int, K_b::Int, k_d::Int, N::Int, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init::AbstractVector{<:AbstractFloat}, proposal_cov_init::AbstractMatrix{<:AbstractFloat}, T_chunk::Int, K_stage::Int, alpha::Union{AbstractFloat,AbstractVector{<:AbstractFloat}}; print_progress=true, regularizer::AbstractFloat=1e-8, K_adapt::Int=0, num_runs_N_adapt::Int=100, target_var::AbstractFloat=2.0, min_N::Int=20)
 
 Run particle marginal Metropolis-Hastings (PMMH) with incremental data and adaptive proposal to obtain samples ``\\{\\theta, x_{0:t_0-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(\\theta, x_{0:t_0-1} \\mid \\mathbb{D}=\\{u_{0:t_0-1}, y_{0:t_0-1}\\})``.
 The number of data points used in the likelihood computation is gradually increased by a fixed chunk size. At each stage, the MMH sampler is run on the current data subset, and the proposal distribution is adapted based on the empirical covariance of the collected samples.
@@ -273,7 +273,7 @@ The number of data points used in the likelihood computation is gradually increa
 - `PMMH_samples`: final samples from full-data posterior
 - `acceptance_ratio`: vector containing the acceptance ratio of each stage
 """
-function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8, K_adapt=0, num_runs_N_adapt=100, target_var=2.0, min_N=20)
+function staged_PMMH(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:AbstractFloat}, n_x::Int, K::Int, K_b::Int, k_d::Int, N::Int, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init::AbstractVector{<:AbstractFloat}, proposal_cov_init::AbstractMatrix{<:AbstractFloat}, T_chunk::Int, K_stage::Int, alpha::Union{AbstractFloat,AbstractVector{<:AbstractFloat}}; print_progress=true, regularizer::AbstractFloat=1e-8, K_adapt::Int=0, num_runs_N_adapt::Int=100, target_var::AbstractFloat=2.0, min_N::Int=20)
     # Get number of parameters, etc.
     n_theta = length(theta_init)
     T = size(y, 2)
@@ -362,7 +362,7 @@ function staged_PMMH(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Func
 end
 
 """
-    adapt_N_blocked(PMMH_samples::Vector{PMMH_sample}, u, y, n_x, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function; K_adapt=1, num_runs=100, target_var=2.0)
+    adapt_N_blocked(PMMH_samples::Vector{PMMH_sample}, u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:AbstractFloat}, n_x::Int, N::Int, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function; K_adapt::Int=1, num_runs::Int=100, target_var::AbstractFloat=2.0)
 
 Estimates the variance of the log-likelihood from repeated runs of the particle filter and returns a recommended new particle number N based on a target variance level.
 This function is similar to `adapt_N`, but it is designed for the blocked PMMH sampler, where the initial state is fixed and needs to be passed to this function.
@@ -388,7 +388,7 @@ This function is similar to `adapt_N`, but it is designed for the blocked PMMH s
 - `N_suggested`: recommended number of particles
 - 'log_likelihood_var_avg`: average variance of the log-likelihood
 """
-function adapt_N_blocked(PMMH_samples::Vector{PMMH_sample}, u, y, n_x, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function; K_adapt=1, num_runs=100, target_var=2.0)
+function adapt_N_blocked(PMMH_samples::Vector{PMMH_sample}, u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:AbstractFloat}, n_x::Int, N::Int, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function; K_adapt::Int=1, num_runs::Int=100, target_var::AbstractFloat=2.0)
     K = size(PMMH_samples, 1)
     if K_adapt > K
         warning("K_adapt is larger than the provided number of samples K. Using K instead.")
@@ -420,7 +420,7 @@ function adapt_N_blocked(PMMH_samples::Vector{PMMH_sample}, u, y, n_x, N, f_thet
 end
 
 """
-    function particle_MMH_blocked(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, log_pdf_x_0::Function, propose_theta_x_0::Function, log_ratio_proposal_pdf::Function, theta_init, x_0_init; print_progress=true)
+    particle_MMH_blocked(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:AbstractFloat}, n_x::Int, K::Int, K_b::Int, k_d::Int, N::Int, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, log_pdf_x_0::Function, propose_theta_x_0::Function, log_ratio_proposal_pdf::Function, theta_init::AbstractVector{<:AbstractFloat}, x_0_init::AbstractVector{<:AbstractFloat}; print_progress::Bool=true)
 
 Run blocked particle marginal Metropolis-Hastings (PMMH) to obtain samples ``\\{\\theta, x_{0:t_0-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(\\theta, x_{0:t_0-1} \\mid \\mathbb{D}=\\{u_{0:t_0-1}, y_{0:t_0-1}\\})``.
 The difference between this function and `particle_MMH` is that the initial state is part of the proposal distribution. This can be beneficial if there is large uncertainty about the initial state and little process noise.
@@ -450,7 +450,7 @@ The difference between this function and `particle_MMH` is that the initial stat
 - `time_sampling`: sampling time
 - `acceptance_ratio`: acceptance ratio of the PMMH sampler
 """
-function particle_MMH_blocked(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, log_pdf_x_0::Function, propose_theta_x_0::Function, log_ratio_proposal_pdf::Function, theta_init, x_0_init; print_progress=true)
+function particle_MMH_blocked(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:AbstractFloat}, n_x::Int, K::Int, K_b::Int, k_d::Int, N::Int, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, log_pdf_x_0::Function, propose_theta_x_0::Function, log_ratio_proposal_pdf::Function, theta_init::AbstractVector{<:AbstractFloat}, x_0_init::AbstractVector{<:AbstractFloat}; print_progress::Bool=true)
     # Total number of samples to be generated
     K_total = K_b + 1 + (K - 1) * (k_d + 1)
 
@@ -549,7 +549,7 @@ function particle_MMH_blocked(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_th
 end
 
 """
-    staged_PMMH_blocked(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, theta_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8, K_adapt=0, num_runs_N_adapt=100, target_var=2.0, min_N=20)
+    staged_PMMH_blocked(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:AbstractFloat}, n_x::Int, K::Int, K_b::Int, k_d::Int, N::Int, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, log_pdf_x_0::Function, theta_init::AbstractVector{<:AbstractFloat}, x_0_init::AbstractVector{<:AbstractFloat}, proposal_cov_init::AbstractMatrix{<:AbstractFloat}, T_chunk::Int, K_stage::Int, alpha::Union{AbstractFloat,AbstractVector{<:AbstractFloat}}; print_progress::Bool=true, regularizer::AbstractFloat=1e-8, K_adapt::Int=0, num_runs_N_adapt::Int=100, target_var::AbstractFloat=2.0, min_N::Int=20)
 
 Run blocked particle marginal Metropolis-Hastings (PMMH) with incremental data and adaptive proposal to obtain samples ``\\{\\theta, x_{0:t_0-1}\\}^{[1:K]}`` from the joint parameter and state posterior distribution ``p(\\theta, x_{0:t_0-1} \\mid \\mathbb{D}=\\{u_{0:t_0-1}, y_{0:t_0-1}\\})``.
 The number of data points used in the likelihood computation is gradually increased by a fixed chunk size. At each stage, the MMH sampler is run on the current data subset, and the proposal distribution is adapted based on the empirical covariance of the collected samples.
@@ -586,7 +586,7 @@ The difference between this function and `staged_PMMH` is that the initial state
 - `PMMH_samples`: final samples from full-data posterior
 - `acceptance_ratio`: vector containing the acceptance ratio of each stage
 """
-function staged_PMMH_blocked(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, log_pdf_x_0::Function, theta_init, x_0_init, proposal_cov_init, T_chunk, K_stage, alpha; print_progress=true, regularizer=1e-8, K_adapt=0, num_runs_N_adapt=100, target_var=2.0, min_N=20)
+function staged_PMMH_blocked(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:AbstractFloat}, n_x::Int, K::Int, K_b::Int, k_d::Int, N::Int, f_theta::Function, g_theta::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, log_pdf_x_0::Function, theta_init::AbstractVector{<:AbstractFloat}, x_0_init::AbstractVector{<:AbstractFloat}, proposal_cov_init::AbstractMatrix{<:AbstractFloat}, T_chunk::Int, K_stage::Int, alpha::Union{AbstractFloat,AbstractVector{<:AbstractFloat}}; print_progress::Bool=true, regularizer::AbstractFloat=1e-8, K_adapt::Int=0, num_runs_N_adapt::Int=100, target_var::AbstractFloat=2.0, min_N::Int=20)
     # Get number of parameters, etc.
     n_theta = length(theta_init)
     T = size(y, 2)
@@ -678,7 +678,7 @@ function staged_PMMH_blocked(u, y, n_x, K, K_b, k_d, N, f_theta::Function, g_the
 end
 
 """
-    compute_ess(PMMH_samples::Vector{PMMH_sample}; max_lag=100)
+    compute_ess(PMMH_samples::Vector{PMMH_sample}; max_lag::Int=100)
 
 Compute the effective sample size (ESS) for each parameter and state.
 
@@ -689,7 +689,7 @@ Compute the effective sample size (ESS) for each parameter and state.
 # Returns
 - `ess`: vector of ESS estimates for all variables.
 """
-function compute_ess(PMMH_samples::Vector{PMMH_sample}; max_lag=100)
+function compute_ess(PMMH_samples::Vector{PMMH_sample}; max_lag::Int=100)
     # Get number of models.
     K = size(PMMH_samples, 1)
 

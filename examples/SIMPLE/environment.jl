@@ -10,7 +10,7 @@ Resets the SIMPLE simulation environment to its initial state.
 - SIMPLE parameters
 - SIMPLE state
 """
-function reset(parameters=nothing)
+function reset(parameters::Union{Nothing,SIMPLE_parameters}=nothing)
     if parameters === nothing
         parameters = default_parameters()
     end
@@ -48,7 +48,7 @@ function step!(parameters::SIMPLE_parameters, state::SIMPLE_state, input::SIMPLE
     fdrought_ = fdrought(D, parameters)
 
     state.mB += R * fsolar_ * parameters.RUE * fco2_ * ftemp_ * fdrought_ * smin(fwater_, fheat_)
-    state.tau += smax(theta - parameters.theta_base, 0)
+    state.tau += smax(theta - parameters.theta_base, 0.0)
     state.I50B += smax(parameters.Iwater * (1 - fwater_), parameters.Iheat * (1 - fheat_))
 
     return state
@@ -81,7 +81,7 @@ function step(parameters::SIMPLE_parameters, state::SIMPLE_state, input::SIMPLE_
     fdrought_ = fdrought(D, parameters)
 
     mB_next = mB + R * fsolar_ * parameters.RUE * fco2_ * ftemp_ * fdrought_ * smin(fwater_, fheat_)
-    tau_next = tau + smax(theta - parameters.theta_base, 0)
+    tau_next = tau + smax(theta - parameters.theta_base, 0.0)
     I50B_next = I50B + smax(parameters.Iwater * (1 - fwater_), parameters.Iheat * (1 - fheat_))
 
     # Return a new state object that holds the new values and history
@@ -106,25 +106,25 @@ function get_yield(parameters::SIMPLE_parameters, state::SIMPLE_state)
 end
 
 """
-    f_theta(theta, x, u)
+    f_theta(theta::AbstractVector{<:AbstractFloat}, x::Union{AbstractVector{<:AbstractFloat},AbstractMatrix{<:AbstractFloat}}, u::Union{AbstractVector{<:AbstractFloat},AbstractMatrix{<:AbstractFloat}})
 
 Wrapper function that simulates the model one step and takes vectors as inputs, which is useful for vectorized operations, e.g., in the particle filter.
 The harvest index is not included in the parameter vector as it is not relevant for the dynamics.
 A constant high CO₂ concentration of 700 ppm is assumed reducing the number of inputs to three.
 
 # Arguments
-- `theta`: vector of model parameters; theta corresponds to [tau_sum; Ia; Ib; theta_base; theta_opt; RUE; Iheat; Iwater; theta_heat; theta_ext; Sco2; Swater; Rmax]
+- `theta`: vector of model parameters; theta corresponds to [tau_sum; Ia] ; theta_base; theta_opt; RUE; Iheat; Iwater; theta_heat; theta_ext; Sco2; Swater; Rmax]
 - `x`: state vector; x[:,1] corresponds to [mB; tau; I50B]
 - `u`: input vector; u[:,1] corresponds to [theta; D; R]
 
 # Returns
 - state vector at the next time step
 """
-function f_theta(theta, x, u)
+function f_theta(theta::AbstractVector{<:AbstractFloat}, x::Union{AbstractVector{<:AbstractFloat},AbstractMatrix{<:AbstractFloat}}, u::Union{AbstractVector{<:AbstractFloat},AbstractMatrix{<:AbstractFloat}})
     # Unpack the parameters
-    # parameters = SIMPLE_parameters(theta[1], theta[2], theta[3], theta[4], theta[5], theta[6], theta[7], theta[8], theta[9], theta[10], theta[11], theta[12], theta[13], 0.0)
+    # parameters = SIMPLE_parameters(theta[1], theta[2], theta[3], theta[4], theta[5], theta[6], theta[7], theta[8], theta[9], theta[10], theta[11], theta[12], 0.0)
 
-    parameters = SIMPLE_parameters(theta[1], theta[2], theta[3], 6.0, 26.0, 1.00 * 1e-3, 100.0, 5.0, 32.0, 45.0, 0.07, 2.5, 0.95, 0.68)
+    parameters = SIMPLE_parameters(theta[1], theta[2], 6.0, 26.0, 1.00 * 1e-3, 100.0, 5.0, 32.0, 45.0, 0.07, 2.5, 0.95, 0.68)
 
     N = size(x, 2)
     x_next = zeros(size(x))

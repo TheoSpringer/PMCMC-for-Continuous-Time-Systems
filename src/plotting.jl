@@ -14,7 +14,7 @@ Simulate the PMMH samples forward in time and compare the predictions to the tes
 - `u_test`: test input
 - `y_test`: test output
 """
-function test_prediction(PMMH_samples::Vector{PMMH_sample}, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, k_n, u_test, y_test)
+function test_prediction(PMMH_samples::Vector{PMMH_sample}, n_x::Int, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, k_n::Int, u_test::AbstractMatrix{<:AbstractFloat}, y_test::AbstractMatrix{<:AbstractFloat})
     println("### Testing model")
 
     # Get number of models, etc.
@@ -85,7 +85,7 @@ Plot the predictions and the test data.
 - `y_min`: min output to be plotted as constraint
 - `y_max`: max output to be plotted as constraint
 """
-function plot_predictions(y_pred, y_test; plot_percentiles=false, y_min=nothing, y_max=nothing)
+function plot_predictions(y_pred::AbstractArray, y_test::AbstractMatrix{<:AbstractFloat}; plot_percentiles::Bool=false, y_min::Union{Nothing,AbstractMatrix{<:AbstractFloat}}=nothing, y_max::Union{Nothing,AbstractMatrix{<:AbstractFloat}}=nothing)
     # Get prediction horizon and number of outputs.
     T_pred = size(y_test, 2)
     n_y = size(y_pred, 1)
@@ -120,10 +120,10 @@ function plot_predictions(y_pred, y_test; plot_percentiles=false, y_min=nothing,
 
         # Plot constraints.
         if y_min !== nothing
-            plot!(Array(0:T_pred-1), y_min', fillrange=minimum([y_pred_min; y_test']) * ones(T_pred), fillcolor=:red, alpha=0.35, label="constraints", legend=:topleft)
+            plot!(Array(0:T_pred-1), y_min[i, :], fillrange=minimum([y_pred_min; y_test']) * ones(T_pred), fillcolor=:red, alpha=0.35, label="constraints", legend=:topleft)
         end
         if y_max !== nothing
-            plot!(Array(0:T_pred-1), y_max', fillrange=maximum([y_pred_max; y_test']) * ones(T_pred), fillcolor=:red, alpha=0.35, label="constraints")
+            plot!(Array(0:T_pred-1), y_max[i, :], fillrange=maximum([y_pred_max; y_test']) * ones(T_pred), fillcolor=:red, alpha=0.35, label="constraints")
         end
 
         title!("\$y_{$i}\$: predicted output vs. true output")
@@ -142,7 +142,7 @@ Plot the autocorrelation function (ACF) of the PMMH samples. This might be helpf
 - `PMMH_samples`: PMMH samples
 - `max_lag`: maximum lag at which to calculate the ACF
 """
-function plot_autocorrelation(PMMH_samples::Vector{PMMH_sample}; max_lag=100)
+function plot_autocorrelation(PMMH_samples::Vector{PMMH_sample}; max_lag::Int=100)
     # Get number of models.
     K = size(PMMH_samples, 1)
 
@@ -231,7 +231,7 @@ Plots an histrogram (empirical probability density fuction (PDF) estimate) for t
 - `prior_pdf`: vector of prior density values for each parameter and latent initial state
 - `true_values`: true values for each parameter and latent initial state
 """
-function plot_parameter_pdf(PMMH_samples::Vector{PMMH_sample}; bins=50, prior_pdf::Union{Nothing,Vector{Tuple{Vector{Float64},Vector{Float64}}}}=nothing, true_values=nothing)
+function plot_parameter_pdf(PMMH_samples::Vector{PMMH_sample}; bins::Int=50, prior_pdf::Union{Nothing,Vector{Tuple{Vector{Float64},Vector{Float64}}}}=nothing, true_values::AbstractVector{<:AbstractFloat}=nothing)
     # Get number of models.
     K = size(PMMH_samples, 1)
 
