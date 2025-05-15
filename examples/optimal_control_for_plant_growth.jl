@@ -74,8 +74,8 @@ propose_theta(theta) = rand(MvNormal(theta, proposal_variance_scaling * theta_co
 theta_init = theta_mean
 
 # Normally distributed initial state
-x_0_mean = [0, 0, 350] # mean
-x_0_var = [1e-3, 1e-3, 12500] # variance
+x_0_mean = [0.0, 0.0, 350.0] # mean
+x_0_var = [1e-3, 1e-3, 12500.0] # variance
 sample_x_0() = rand(MvNormal(x_0_mean, Diagonal(x_0_var)))
 log_pdf_x_0(x_0) = -0.5 * sum((x_0 - x_0_mean) .* (Diagonal(x_0_var) \ (x_0 - x_0_mean)), dims=1)
 
@@ -127,6 +127,7 @@ x_test = x[:, T_train+1:end]
 y_test = y[:, T_train+1:end]
 
 # Plot data.
+#=
 plot()
 for i in 1:n_u
     plot!(1:T_total, u[i, :], label="u_$i", lw=2, legend=:topright)
@@ -136,20 +137,17 @@ for i in 1:n_y
 end
 xlabel!("t")
 ylabel!("u | y")
-
-# Adjust number of particles for the particle filter. This requires a good estimate of the parameters theta.
-#=
-N_suggested = adapt_N(u, y, n_x, N_init, theta_true, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta; num_runs=100, target_var=2)[1]
-@printf("Suggested N: %i\n", N_suggested)
 =#
 
 # Run a staged PMMH sampler.
 # Aim for an acceptance ratio of around 20–30% for a random-walk proposal.
 PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
 
-# In case the uncertainty about the initial state is large and/or the process noise is small, it may be beneficial to use a blocked PMMH sampler.
-# proposal_cov_init = Diagonal(vcat(theta_var, x_0_var)) # initial proposal covariance for theta and x_0
-# PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH_blocked(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_v_theta, log_pdf_w_theta, log_pdf_theta, log_pdf_x_0, theta_init, x_0_init, proposal_cov_init, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
+# In case the parameters theta and the initial state are highly correlated, e.g., due to small process noise, it may be beneficial to use a blocked PMMH sampler.
+#=
+proposal_cov_init = Diagonal(vcat(theta_var, x_0_var)) # initial proposal covariance for theta and x_0
+PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH_blocked(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_v_theta, log_pdf_w_theta, log_pdf_theta, log_pdf_x_0, theta_init, x_0_init, proposal_cov_init, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
+=#
 
 # Simulate the posterior models forward and compare to test data.
 # The predicted trajectories should track the true outputs well.
@@ -199,5 +197,32 @@ R_hat = PMMHopt.compute_gelman_rubin(PMMH_chains)
 @printf("Maximum R̂: %.2f\n", maximum(R_hat))
 =#
 
+### Formulate the optimal control problem (OCP) using the PMMH samples.
+# Define the cost function. Objective: maximize economic profit.
+
+# Revenue from selling the crops.
+# The price for the crop is set well above current prices as vertical farming is not yet economically competitive.
+price_crop = 200 # selling price per kg/m² of crop in €
+HI = 0.68 # harvest index - proportion of total biomass that is harvestable
+revenue(mB) = price_crop * HI * mB # revenue as a function of biomass
+
+# Costs: heating, cooling, radiation, and irrigation.
+price_kwh = 0.14 # price per kWh in €
+price_MJ = (1/3.6) * price_kwh # price per MJ in €
+
+heat_capacity_air = 1.2e-3  # volumetric heat capacity of air in MJ/m³/K
+theta_ambient = 10  # ambient temperature in °C
+theta_max = 35  # maximum temperature in °C
+c_theta = heat_capacity*price_MJ/(theta_max - theta_ambient) # coefficient for heating/cooling cost
+cost_heating(theta) = c_theta * (theta - theta_ambient) # heating cost as a function of air temperature
+
+cost_radiation(R) = c_MJ * R # cost of radiation as a function of radiation
+
+c_d = 0.02 # cost coefficient for irrigation cost
+cost_irrigation(D) = c_d * (D-1)^2 # cost of irrigation as a function of the relative level of drought
+
+# Cost function (negative profit).
+J(u, x, y) = 
+
 # Start optimization.
-# PMMHopt.solve_PMMH_OCP(PMMH_samples, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, H, J::Function, h_scenario::Function, h_u::Function; J_u=false, x_vec_0=nothing, v_vec=nothing, w_vec=nothing, u_init=nothing, K_pre_solve=0, solver_opts=nothing, print_progress=true)
+# PMMHopt.solve_PMMH_OCP(PMMH_samples, n_y, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, H, J::Function, h_scenario::Function, h_u::Function; J_u=false, x_vec_0=nothing, v_vec=nothing, w_vec=nothing, u_init=nothing, K_pre_solve=0, solver_opts=nothing, print_progress=true)
