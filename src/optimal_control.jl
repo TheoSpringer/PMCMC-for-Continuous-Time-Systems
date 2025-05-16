@@ -78,7 +78,7 @@ h(&u_{0:H},x_{0:H}^{[k]},y_{0:H}^{[k]}) \\leq 0.
 - `w_vec`: array of dimension n_y x H x K that contains the measurement noise for all models and all timesteps - if not provided, the noise is sampled using the function `sample_w_theta`
 - `u_init`: initial guess for the input trajectory
 - `K_pre_solve`: if `K_pre_solve > 0`, an initial guess for the optimal input trajectory is obtained by solving the OCP with only `K_pre_solve < K` models
-- `opts`: SolverOptions struct containing options of the solver
+- `solver_opts`: SolverOptions struct containing options of the solver
 - `print_progress`: if set to true, the progress is printed
 """
 function solve_PMMH_OCP(PMMH_samples::Vector{PMMH_sample}, n_y::Int, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, H, J::Function, h_scenario::Function, h_u::Function; J_u=false, x_vec_t=nothing, v_vec=nothing, w_vec=nothing, u_init=nothing, K_pre_solve=0, solver_opts=nothing, print_progress=true)
@@ -110,7 +110,7 @@ function solve_PMMH_OCP(PMMH_samples::Vector{PMMH_sample}, n_y::Int, f_theta::Fu
     if v_vec === nothing
         v_vec = Array{Float64}(undef, n_x, H, K)
         for k in 1:K
-            v_vec[:, :, k] = sample_v_theta(PMMH_samples[k].theta, 1)
+            v_vec[:, :, k] = sample_v_theta(PMMH_samples[k].theta, H)
         end
     end
 
@@ -118,7 +118,7 @@ function solve_PMMH_OCP(PMMH_samples::Vector{PMMH_sample}, n_y::Int, f_theta::Fu
     if w_vec === nothing
         w_vec = Array{Float64}(undef, n_y, H, K)
         for k in 1:K
-            w_vec[:, :, k] = sample_w_theta(PMMH_samples[k].theta, 1)
+            w_vec[:, :, k] = sample_w_theta(PMMH_samples[k].theta, H)
         end
     end
 
@@ -141,7 +141,7 @@ function solve_PMMH_OCP(PMMH_samples::Vector{PMMH_sample}, n_y::Int, f_theta::Fu
             end
 
             # Solve problem that only contains K_pre_solve randomly selected scenarios.
-            u_init = solve_PMMH_OCP(PMMH_samples[k_pre_solve], f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; J_u=J_u, x_vec_t=x_vec_t_pre_solve, v_vec=v_vec[:, :, k_pre_solve], e_vec=e_vec[:, :, k_pre_solve], K_pre_solve=0, solver_opts=solver_opts, print_progress=print_progress)[1]
+            u_init = solve_PMMH_OCP(PMMH_samples[k_pre_solve], n_y, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; J_u=J_u, x_vec_t=x_vec_t_pre_solve, v_vec=v_vec[:, :, k_pre_solve], w_vec=w_vec[:, :, k_pre_solve], K_pre_solve=0, solver_opts=solver_opts, print_progress=print_progress)[1]
 
             if print_progress
                 println("###### Pre-solving step complete, switching back to the original problem")
@@ -161,7 +161,7 @@ function solve_PMMH_OCP(PMMH_samples::Vector{PMMH_sample}, n_y::Int, f_theta::Fu
         g(x, u) = g_theta(PMMH_samples[k].theta, x, u)
         for t in 1:H
             x_0[n_x*(k-1)+1:n_x*k, t+1] = f(x_0[n_x*(k-1)+1:n_x*k, t], u_init[:, t]) + v_vec[:, t, k]
-            Y_init[n_y*(k-1)+1:n_y*k, t] = g(x_0[n_x*(k-1)+1:n_x*k, t], u_init[:, t]) + e_vec[:, t, k]
+            Y_init[n_y*(k-1)+1:n_y*k, t] = g(x_0[n_x*(k-1)+1:n_x*k, t], u_init[:, t]) + w_vec[:, t, k]
         end
     end
 
@@ -177,8 +177,10 @@ function solve_PMMH_OCP(PMMH_samples::Vector{PMMH_sample}, n_y::Int, f_theta::Fu
     end
 
     # Set options.
-    for opt in solver_opts
-        set_attributes(OCP, opt)
+    if !(solver_opts === nothing)
+        for opt in solver_opts
+            set_attributes(OCP, opt)
+        end
     end
 
     if !print_progress
@@ -205,7 +207,7 @@ function solve_PMMH_OCP(PMMH_samples::Vector{PMMH_sample}, n_y::Int, f_theta::Fu
         # Add dynamic constraints
         for t in 1:H
             @constraint(OCP, X[n_x*(k-1)+1:n_x*k, t+1] .== f(X[n_x*(k-1)+1:n_x*k, t], U[:, t]) + v_vec[:, t, k])
-            @constraint(OCP, Y[n_y*(k-1)+1:n_y*k, t] .== g(X[n_x*(k-1)+1:n_x*k, t], U[:, t]) + e_vec[:, t, k])
+            @constraint(OCP, Y[n_y*(k-1)+1:n_y*k, t] .== g(X[n_x*(k-1)+1:n_x*k, t], U[:, t]) + w_vec[:, t, k])
         end
 
         # Add scenario constraints.
@@ -260,7 +262,7 @@ function solve_PMMH_OCP(PMMH_samples::Vector{PMMH_sample}, n_y::Int, f_theta::Fu
 end
 
 """
-    solve_PG_OCP_greedy_guarantees(PMMH_samples::Vector{PMMH_sample}, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, H, J, h_scenario, h_u, β; J_u=false, x_vec_t=nothing, v_vec=nothing, e_vec=nothing, u_init=nothing, K_pre_solve=0, solver_opts=nothing, print_progress=true)
+    solve_PG_OCP_greedy_guarantees(PMMH_samples::Vector{PMMH_sample}, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, H, J, h_scenario, h_u, β; J_u=false, x_vec_t=nothing, v_vec=nothing, w_vec=nothing, u_init=nothing, K_pre_solve=0, solver_opts=nothing, print_progress=true)
 
 Solve the sample-based optimal control problem using Ipopt and determine a support sub-sample with cardinality s via a greedy constraint removal.
 Based on the cardinality s, a bound on the probability that the incurred cost exceeds the worst-case cost or that the constraints are violated when the input trajectory u_{0:H} is applied to the unknown system is calculated.
@@ -293,10 +295,10 @@ h(&u_{0:H},x_{0:H}^{[k]},y_{0:H}^{[k]}) \\leq 0.
 - `J_u`: set to true if cost depends only on inputs ``u_{1:H}` - this accelerates the optimization
 - `x_vec_t`: vector with K * n_x elements containing the initial state of all models - if not provided, the initial states are sampled based on the PGS samples
 - `v_vec`: array of dimension n_x x H x K that contains the process noise for all models and all timesteps - if not provided, the noise is sampled based on the PGS samples
-- `e_vec`: array of dimension n_y x H x K that contains the measurement noise for all models and all timesteps - if not provided, the noise is sampled based on the provided `R`
+- `w_vec`: array of dimension n_y x H x K that contains the measurement noise for all models and all timesteps - if not provided, the noise is sampled based on the provided `R`
 - `u_init`: initial guess for the optimal trajectory
 - `K_pre_solve`: if `K_pre_solve > 0`, an initial guess for the optimal trajectory is obtained by solving the OCP with only `K_pre_solve < K` models
-- `opts`: SolverOptions struct containing options of the solver
+- `solver_opts`: SolverOptions struct containing options of the solver
 - `print_progress`: if set to true, the progress is printed
 """
 function solve_PG_OCP_greedy_guarantees(PMMH_samples::Vector{PMMH_sample}, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, H, J::Function, h_scenario::Function, h_u::Function, β; J_u=false, x_vec_t=nothing, v_vec=nothing, w_vec=nothing, u_init=nothing, K_pre_solve=0, solver_opts=nothing, print_progress=true)
@@ -349,7 +351,7 @@ function solve_PG_OCP_greedy_guarantees(PMMH_samples::Vector{PMMH_sample}, n_x, 
     # The OCP is solved again with initialization to obtain the optimal input u_opt.
     solver_opts["mu_init"] = mu
     println("### Startet optimization of fully constrained problem with initialization")
-    u_opt, x_opt, y_opt, J_opt, solve_successful, iter = solve_PMMH_OCP(PMMH_samples, n_x, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; J_u=J_u, x_vec_t=x_vec_t, v_vec=v_vec, e_vec=e_vec, u_init=u_init, K_pre_solve=K_pre_solve, solver_opts=solver_opts, print_progress=print_progress)[1:6]
+    u_opt, x_opt, y_opt, J_opt, solve_successful, iter = solve_PMMH_OCP(PMMH_samples, n_x, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; J_u=J_u, x_vec_t=x_vec_t, v_vec=v_vec, w_vec=w_vec, u_init=u_init, K_pre_solve=K_pre_solve, solver_opts=solver_opts, print_progress=print_progress)[1:6]
 
     # Determine guarantees.
     # If a feasible u_opt is found, probabilistic constraint satisfaction guarantees are derived by greedily removing constraints to determine a support sub-sample S.
@@ -391,7 +393,7 @@ function solve_PG_OCP_greedy_guarantees(PMMH_samples::Vector{PMMH_sample}, n_x, 
             end
 
             # Solve the OCP with reduced constraint set.
-            u_opt_temp, J_opt_temp, solve_successful_temp = solve_PMMH_OCP(PMMH_samples[temp_scenarios], n_x, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; J_u=J_u, x_vec_t=x_vec_t_temp, v_vec=v_vec[:, :, temp_scenarios], e_vec=e_vec[:, :, temp_scenarios], u_init=u_init, K_pre_solve=0, solver_opts=solver_opts, print_progress=print_progress)[[1, 4, 5]]
+            u_opt_temp, J_opt_temp, solve_successful_temp = solve_PMMH_OCP(PMMH_samples[temp_scenarios], n_x, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; J_u=J_u, x_vec_t=x_vec_t_temp, v_vec=v_vec[:, :, temp_scenarios], w_vec=w_vec[:, :, temp_scenarios], u_init=u_init, K_pre_solve=0, solver_opts=solver_opts, print_progress=print_progress)[[1, 4, 5]]
 
             # If the optimization is successful and the solution does not change, permanently remove the constraints corresponding to the PG samples with index i from the constraint set.
             # A valid subsample has the same local minimum. However, since the numerical solver does not reach this minimum exactly, a threshold value is used here to check whether the solutions are the same.

@@ -120,7 +120,7 @@ A constant high CO₂ concentration of 700 ppm is assumed reducing the number of
 # Returns
 - state vector at the next time step
 """
-function f_theta(theta::AbstractVector{<:AbstractFloat}, x::Union{AbstractVector{<:AbstractFloat},AbstractMatrix{<:AbstractFloat}}, u::Union{AbstractVector{<:AbstractFloat},AbstractMatrix{<:AbstractFloat}})
+function f_theta(theta::AbstractVector{<:AbstractFloat}, x::Union{AbstractVector{<:AbstractFloat},AbstractMatrix{<:AbstractFloat},Vector{VariableRef}}, u::Union{AbstractVector{<:AbstractFloat},AbstractMatrix{<:AbstractFloat},Vector{VariableRef}})
     # Unpack the parameters
     # parameters = SIMPLE_parameters(theta[1], theta[2], theta[3], theta[4], theta[5], theta[6], theta[7], theta[8], theta[9], theta[10], theta[11], theta[12], 0.0)
 

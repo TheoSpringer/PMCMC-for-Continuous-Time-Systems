@@ -229,7 +229,7 @@ function particle_MMH(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:Ab
     time_sampling = time() - sampling_timer
     acceptance_ratio = ((K_total - 1) / n_proposals) * 100
 
-    # Print results.
+    # Print runtime and acceptance ratio.
     if print_progress
         @printf("### PMMH sampling complete\nRuntime: %.2f s\nAcceptance ratio: %.2f %%\n", time_sampling, acceptance_ratio)
     end
@@ -352,12 +352,14 @@ function staged_PMMH(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:Abs
         end
     end
 
+    # Print runtime and average acceptance ratio.
     average_acceptance_ratio = mean(acceptance_ratio)
     time_sampling = time() - sampling_timer
     if print_progress
         @printf("### Staged PMMH sampling complete\nRuntime: %.2f s\nAverage acceptance ratio: %.2f %%\n",
             time_sampling, average_acceptance_ratio)
     end
+
     return PMMH_samples, acceptance_ratio, time_sampling
 end
 
@@ -540,7 +542,7 @@ function particle_MMH_blocked(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMat
     time_sampling = time() - sampling_timer
     acceptance_ratio = ((K_total - 1) / n_proposals) * 100
 
-    # Print results.
+    # Print runtime and acceptance ratio.
     if print_progress
         @printf("### Blocked PMMH sampling complete\nRuntime: %.2f s\nAcceptance ratio: %.2f %%\n", time_sampling, acceptance_ratio)
     end
@@ -668,12 +670,14 @@ function staged_PMMH_blocked(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatr
         end
     end
 
+    # Print runtime and average acceptance ratio.
     average_acceptance_ratio = mean(acceptance_ratio)
     time_sampling = time() - sampling_timer
     if print_progress
         @printf("### Staged PMMH sampling complete\nRuntime: %.2f s\nAverage acceptance ratio: %.2f %%\n",
             time_sampling, average_acceptance_ratio)
     end
+    
     return PMMH_samples, acceptance_ratio, time_sampling
 end
 

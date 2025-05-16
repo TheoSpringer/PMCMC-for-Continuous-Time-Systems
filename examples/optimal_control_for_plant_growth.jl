@@ -1,3 +1,4 @@
+using Revise
 using LinearAlgebra
 using Random
 using Distributions
@@ -5,14 +6,16 @@ using Plots
 using StatsPlots
 using Printf
 using Base.Threads
+using JLD2
+using JuMP
+import HSL_jll
+
+using PMMHopt
 
 include("SIMPLE/SIMPLE.jl")
 include("TOMGRO/TOMGRO.jl")
-include("../src/PMMHopt.jl")
-
 using .SIMPLE
 using .TOMGRO
-using .PMMHopt
 
 # Specify seed (for reproducible results).
 Random.seed!(1)
@@ -21,7 +24,7 @@ Random.seed!(1)
 sampling_timer = time()
 
 # Learning parameters.
-K = Int(1e4) # number of PMMH samples in final stage
+K = Int(1e2) # Int(1e4) # number of PMMH samples in final stage
 k_d = 0 # number of samples to be skipped to decrease correlation (thinning)
 K_b = 200 # length of burn-in period for each stage
 N_init = 200 # initial number of particles of the particle filter - will be adjusted later
@@ -80,7 +83,7 @@ sample_x_0() = rand(MvNormal(x_0_mean, Diagonal(x_0_var)))
 log_pdf_x_0(x_0) = -0.5 * sum((x_0 - x_0_mean) .* (Diagonal(x_0_var) \ (x_0 - x_0_mean)), dims=1)
 
 # Initial guess for initial state. Only relevant for blocked PMMH.
-x_0_init = x_0_mean
+# x_0_init = x_0_mean
 
 # Parameters for data generation.
 T_train = 40 # number of days for training
@@ -141,8 +144,10 @@ ylabel!("u | y")
 
 # Run a staged PMMH sampler.
 # Aim for an acceptance ratio of around 20–30% for a random-walk proposal.
-PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
+# PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
+@load "PMMH_samples.jld2" PMMH_samples
 
+#=
 # In case the parameters theta and the initial state are highly correlated, e.g., due to small process noise, it may be beneficial to use a blocked PMMH sampler.
 #=
 proposal_cov_init = Diagonal(vcat(theta_var, x_0_var)) # initial proposal covariance for theta and x_0
@@ -196,6 +201,7 @@ end
 R_hat = PMMHopt.compute_gelman_rubin(PMMH_chains)
 @printf("Maximum R̂: %.2f\n", maximum(R_hat))
 =#
+=#
 
 ### Formulate the optimal control problem (OCP) using the PMMH samples.
 # Define the cost function. Objective: maximize economic profit.
@@ -208,21 +214,41 @@ revenue(mB) = price_crop * HI * mB # revenue as a function of biomass
 
 # Costs: heating, cooling, radiation, and irrigation.
 price_kwh = 0.14 # price per kWh in €
-price_MJ = (1/3.6) * price_kwh # price per MJ in €
+price_MJ = (1 / 3.6) * price_kwh # price per MJ in €
 
 heat_capacity_air = 1.2e-3  # volumetric heat capacity of air in MJ/m³/K
-theta_ambient = 10  # ambient temperature in °C
-theta_max = 35  # maximum temperature in °C
-c_theta = heat_capacity*price_MJ/(theta_max - theta_ambient) # coefficient for heating/cooling cost
-cost_heating(theta) = c_theta * (theta - theta_ambient) # heating cost as a function of air temperature
+theta_ambient = 10.0  # ambient temperature in °C
+theta_max = 35.0  # maximum temperature in °C
+c_theta = heat_capacity_air .* price_MJ ./ (theta_max .- theta_ambient) # coefficient for heating/cooling cost
+cost_heating(theta) = c_theta .* (theta .- theta_ambient) # heating cost as a function of air temperature
 
-cost_radiation(R) = c_MJ * R # cost of radiation as a function of radiation
+cost_radiation(R) = price_MJ * R # cost of radiation as a function of radiation
 
 c_d = 0.02 # cost coefficient for irrigation cost
-cost_irrigation(D) = c_d * (D-1)^2 # cost of irrigation as a function of the relative level of drought
+cost_irrigation(D) = c_d .* (D .- 1) .^ 2 # cost of irrigation as a function of the relative level of drought
 
 # Cost function (negative profit).
-J(u, x, y) = 
+J(u, x, y) = revenue(x[1, end]) .+ sum(cost_heating(u[1, :]) .+ cost_radiation(u[3, :]) .+ cost_irrigation(u[2, :])) # total revenue
+
+# Scenario dependent constraints for u, x, and y.
+h_scenario(u, x, y) = 0.0
+
+# Scenario independent constraints for the inputs u.
+h_u(u) = [
+    u[1, :] .- 35.0; # maximum temperature
+    0.0 .- u[1, :]; # minimum temperature
+    u[2, :] .- 1.0; # maximum drought index
+    0.0 .- u[2, :]; # minimum drought index
+    u[3, :] .- 35.0; # maximum radiation
+    0.0 .- u[3, :] # minimum radiation
+]
+
+# Parameters for the OCP.
+H = 10 # time horizon in days
+K_pre_solve = 10 # number of samples used to pre-solve the OCP to get a good initial guess
+
+# Ipopt options
+Ipopt_options = Dict("max_iter" => 10000, "tol" => 1e-8, "hsllib" => HSL_jll.libhsl_path, "linear_solver" => "ma57")
 
 # Start optimization.
-# PMMHopt.solve_PMMH_OCP(PMMH_samples, n_y, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, H, J::Function, h_scenario::Function, h_u::Function; J_u=false, x_vec_0=nothing, v_vec=nothing, w_vec=nothing, u_init=nothing, K_pre_solve=0, solver_opts=nothing, print_progress=true)
+PMMHopt.solve_PMMH_OCP(PMMH_samples, n_y, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, H, J::Function, h_scenario::Function, h_u::Function; K_pre_solve=K_pre_solve, solver_opts=Ipopt_options)
