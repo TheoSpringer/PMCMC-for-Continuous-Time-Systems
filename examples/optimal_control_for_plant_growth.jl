@@ -35,7 +35,7 @@ regularizer = 0.0 # regularizer for proposal covariance
 
 # Number of states, etc.
 n_x = 3 # number of states
-n_u = 2 # number of control inputs
+n_u = 3 # number of control inputs
 n_y = 2 # number of outputs
 
 # State transition function.
@@ -209,7 +209,7 @@ R_hat = PMMHopt.compute_gelman_rubin(PMMH_chains)
 
 # Revenue from selling the crops.
 # The price for the crop is set well above current prices as vertical farming is not yet economically competitive.
-price_crop = 200 # selling price per kg/m² of crop in €
+price_crop = 1000 # selling price per kg/m² of crop in €
 HI = 0.68 # harvest index - proportion of total biomass that is harvestable
 revenue(mB) = price_crop * HI * mB # revenue as a function of biomass
 
@@ -229,7 +229,7 @@ c_d = 0.02 # cost coefficient for irrigation cost
 cost_irrigation(D) = c_d .* (D .- 1) .^ 2 # cost of irrigation as a function of the relative level of drought
 
 # Cost function (negative profit).
-J(u, x, y) = revenue(x[1, end]) .+ sum(cost_heating(u[1, :]) .+ cost_radiation(u[3, :]) .+ cost_irrigation(u[2, :])) # total revenue
+J(u, x, y) = -revenue(x[1, end]) .+ sum(cost_heating(u[1, :]) .+ cost_radiation(u[3, :]) .+ cost_irrigation(u[2, :])) # total revenue
 
 # Scenario dependent constraints for u, x, and y.
 h_scenario(u, x, y) = 0.0
@@ -253,20 +253,20 @@ Ipopt_options = Dict("max_iter" => 10000, "tol" => 1e-8, "hsllib" => HSL_jll.lib
 
 # Start optimization.
 # u_opt, x_opt, y_opt, J_opt = PMMHopt.solve_PMMH_OCP(PMMH_samples, n_y, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; K_pre_solve=K_pre_solve, solver_opts=Ipopt_options)[1:4]
-u_init = zeros(n_u, H) # initial guess for the input trajectory
-u_opt, x_opt, y_opt, J_opt = PMMHopt.solve_PMMH_OCP(PMMH_samples, n_y, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; u_init=u_init, solver_opts=Ipopt_options)[1:4]
+U_init = zeros(n_u, H) # initial guess for the input trajectory
+U_opt, X_opt, Y_opt, J_opt = PMMHopt.solve_PMMH_OCP(PMMH_samples, n_y, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; U_init=U_init, solver_opts=Ipopt_options)[1:4]
 
 # Apply optimal input trajectory to the system and simulate forward.
-y_sys = Array{Float64}(undef, n_y, H)
-x_sys = Array{Float64}(undef, n_x, H)
-x_sys[:, 1] = x_training[:, end]
-u_sys = u_opt
+y_true = Array{Float64}(undef, n_y, H)
+x_true = Array{Float64}(undef, n_x, H)
+x_true[:, 1] = x_test[:, 1]
+u_true = U_opt
+for t in 2:H
+    x_true[:, t] = f_true(x_true[:, t-1], u_true[:, t-1]) + sample_v_true(1)
+end
 for t in 1:H
-    if t >= 2
-        x_sys[:, t] = f_true(x_sys[:, t-1], u_sys[:, t-1]) + sample_v_true(1)
-    end
-    y_sys[:, t] = g_true(x_sys[:, t], u_sys[:, t]) + sample_w_true(1)
+    y_true[:, t] = g_true(x_true[:, t], u_true[:, t]) + sample_w_true(1)
 end
 
 # Plot predictions.
-plot_predictions(y_opt, y_sys)
+plot_predictions(Y_opt, y_true)
