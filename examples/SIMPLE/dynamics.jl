@@ -1,31 +1,31 @@
 const eps = 1e-5
 
 """
-    smax(a::AbstractFloat, b::AbstractFloat)
+    smax(a, b)
 Smoothened maximum operator max(a,b).
 """
-function smax(a::AbstractFloat, b::AbstractFloat)
+function smax(a, b)
     return (a + b + sqrt((a - b)^2 + eps)) / 2
 end
 
 """
-    smin(a::AbstractFloat, b::AbstractFloat)
+    smin(a, b)
 Smoothened minimum operator min(a,b).
 """
-function smin(a::AbstractFloat, b::AbstractFloat)
+function smin(a, b)
     return -smax(-a, -b)
 end
 
 """
-    sclip(a::AbstractFloat, lb::AbstractFloat, ub::AbstractFloat)
+    sclip(a, lb, ub)
 Smoothened clipping operator max(lb, min(a,ub)).
 """
-function sclip(a::AbstractFloat, lb::AbstractFloat, ub::AbstractFloat)
+function sclip(a, lb, ub)
     return smax(lb, smin(a, ub))
 end
 
 """
-    fsolar(tau::AbstractFloat, I50B::AbstractFloat, parameters::SIMPLE_parameters)
+    fsolar(tau, I50B, parameters)
 Compute fraction of solar radiation intercepted by a crop canopy; see Zhao(2019).
 
 # Arguments
@@ -36,7 +36,7 @@ Compute fraction of solar radiation intercepted by a crop canopy; see Zhao(2019)
 # Returns
 - fraction of solar radiation intercepted by a crop canopy
 """
-function fsolar(tau::AbstractFloat, I50B::AbstractFloat, parameters::SIMPLE_parameters)
+function fsolar(tau, I50B, parameters::SIMPLE_parameters)
     fsolar1 = parameters.Rmax / (1 + exp(-0.01 * (tau - parameters.Ia)))
     fsolar2 = parameters.Rmax / (1 + exp(0.01 * (tau - (parameters.tau_sum - I50B))))
     fsolar = smin(fsolar1, fsolar2)
@@ -44,7 +44,7 @@ function fsolar(tau::AbstractFloat, I50B::AbstractFloat, parameters::SIMPLE_para
 end
 
 """
-    ftemp(theta::AbstractFloat, parameters::SIMPLE_parameters)
+    ftemp(theta, parameters::SIMPLE_parameters)
 Compute impact of temperature on biomass growth rate; see Zhao(2019).
 
 # Arguments
@@ -54,7 +54,7 @@ Compute impact of temperature on biomass growth rate; see Zhao(2019).
 # Returns
 - impact of temperature on biomass growth rate
 """
-function ftemp(theta::AbstractFloat, parameters::SIMPLE_parameters)
+function ftemp(theta, parameters::SIMPLE_parameters)
     ftemp1 = 1.0
     ftemp2 = (theta - parameters.theta_base) / (parameters.theta_opt - parameters.theta_base)
     ftemp3 = 0.0
@@ -63,7 +63,7 @@ function ftemp(theta::AbstractFloat, parameters::SIMPLE_parameters)
 end
 
 """
-    fheat(theta::AbstractFloat, parameters::SIMPLE_parameters)
+    fheat(theta, parameters::SIMPLE_parameters)
 
 Compute the impact of heat stress on biomass growth rate; see Zhao(2019).
 
@@ -74,7 +74,7 @@ Compute the impact of heat stress on biomass growth rate; see Zhao(2019).
 # Returns
 - heat stress factor
 """
-function fheat(theta::AbstractFloat, parameters::SIMPLE_parameters)
+function fheat(theta, parameters::SIMPLE_parameters)
     fheat1 = 1.0
     fheat2 = 1 - (theta - parameters.theta_heat) / (parameters.theta_ext - parameters.theta_heat)
     fheat3 = 0.0
@@ -83,7 +83,7 @@ function fheat(theta::AbstractFloat, parameters::SIMPLE_parameters)
 end
 
 """
-    fco2(CO2::AbstractFloat, parameters::SIMPLE_parameters)
+    fco2(CO2, parameters::SIMPLE_parameters)
 Compute the impact of CO₂ on RUE; see Zhao(2019).
 
 # Arguments
@@ -93,7 +93,7 @@ Compute the impact of CO₂ on RUE; see Zhao(2019).
 # Returns
 - impact of CO₂ on RUE
 """
-function fco2(CO2::AbstractFloat, parameters::SIMPLE_parameters)
+function fco2(CO2, parameters::SIMPLE_parameters)
     fco21 = 1 + parameters.Sco2 * 350
     fco22 = 1 + parameters.Sco2 * (CO2 - 350)
     fco23 = 1.0
@@ -102,7 +102,7 @@ function fco2(CO2::AbstractFloat, parameters::SIMPLE_parameters)
 end
 
 """
-    fwater(D::AbstractFloat, parameters::SIMPLE_parameters)
+    fwater(D, parameters::SIMPLE_parameters)
 Compute the drought stress impact on RUE; see Zhao(2019).
 
 # Arguments
@@ -112,7 +112,7 @@ Compute the drought stress impact on RUE; see Zhao(2019).
 # Returns
 - drought stress impact on RUE
 """
-function fwater(D::AbstractFloat, parameters::SIMPLE_parameters)
+function fwater(D, parameters::SIMPLE_parameters)
     fwater1 = 1.0
     fwater2 = 1 - parameters.Swater * D
     fwater3 = 0.0
@@ -122,7 +122,7 @@ end
 
 
 """
-    fdrought(D::AbstractFloat, parameters::SIMPLE_parameters)
+    fdrought(D, parameters::SIMPLE_parameters)
 Compute the drought stress impact on radiation interception; see Zhao(2019).
 
 # Arguments
@@ -132,7 +132,7 @@ Compute the drought stress impact on radiation interception; see Zhao(2019).
 # Returns
 - drought stress impact on radiation interception
 """
-function fdrought(D::AbstractFloat, parameters::SIMPLE_parameters)
+function fdrought(D, parameters::SIMPLE_parameters)
     fdrought1 = 1.0
     fdrought2 = 1.9 - parameters.Swater * D
     fdrought3 = 0.9

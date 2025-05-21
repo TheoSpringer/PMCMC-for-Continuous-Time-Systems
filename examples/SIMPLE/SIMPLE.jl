@@ -86,16 +86,16 @@ const I50B_init = 400.0 # I50B parameter in paper
 """
 ## SIMPLE State
 
-Holds the state of the SIMPLE simulation, including historical data.
+Holds the state of the SIMPLE simulation.
 
 - `mB`: biomass
 - `tau`: cumulative temperature
 - `I50B`: leaf senescence
 """
-mutable struct SIMPLE_state
-    mB::Float64
-    tau::Float64
-    I50B::Float64
+mutable struct SIMPLE_state{T1,T2,T3}
+    mB::T1
+    tau::T2
+    I50B::T3
 end
 
 """
@@ -108,11 +108,11 @@ Holds the input of the SIMPLE simulation.
 - `R`: radiation
 - `CO2`: atmospheric CO₂ concentration
 """
-mutable struct SIMPLE_input
-    theta::Float64
-    D::Float64
-    R::Float64
-    CO2::Float64
+mutable struct SIMPLE_input{T1,T2,T3,T4}
+    theta::T1
+    D::T2
+    R::T3
+    CO2::T4
 end
 
 # Include dependencies

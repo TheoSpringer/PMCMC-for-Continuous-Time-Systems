@@ -1,5 +1,5 @@
 """
-    radiation2ppfd(r::AbstractFloat)
+    radiation2ppfd(r)
 Convert radiation to photosynthetic photon flux density (PPFD).
 
 # Arguments
@@ -8,12 +8,12 @@ Convert radiation to photosynthetic photon flux density (PPFD).
 # Returns
 - `ppfd`: Converted PPFD in µmol/m²/s
 """
-function radiation2ppfd(r::Union{AbstractFloat,AbstractVector{<:AbstractFloat}})
+function radiation2ppfd(r)
     return r * 1e6 * 0.48 * 4.57 / 86400
 end
 
 """
-    fN(T::AbstractFloat)
+    fN(T)
 Compute scaling fN, which modifies the node development rate depending on the temperature; see Heuvelink(1994) & Jones(1991).
 
 # Arguments
@@ -22,7 +22,7 @@ Compute scaling fN, which modifies the node development rate depending on the te
 # Returns
 - scaling fN
 """
-function fN(T::AbstractFloat)
+function fN(T)
     if 12 < T <= 28
         return 1.0 + 0.0281 * (T - 28)
     elseif 28 < T < 50
@@ -33,7 +33,7 @@ function fN(T::AbstractFloat)
 end
 
 """
-    dNdt(fN_::AbstractFloat, parameters::TOMGRO_parameters)
+    dNdt(fN_, parameters::TOMGRO_parameters)
 Compute node development rate; see Jones(1999).
 
 # Arguments
@@ -43,12 +43,12 @@ Compute node development rate; see Jones(1999).
 # Returns
 - node development rate
 """
-function dNdt(fN_::AbstractFloat, parameters::TOMGRO_parameters)
+function dNdt(fN_, parameters::TOMGRO_parameters)
     return parameters.Nm * fN_
 end
 
 """
-    lambda(Td::AbstractFloat)
+    lambda(Td)
 Compute scaling lambda, which reduces the rate of leaf area expansion depending on the temperature.
 
 # Arguments
@@ -57,12 +57,12 @@ Compute scaling lambda, which reduces the rate of leaf area expansion depending 
 # Returns
 - scaling lambda
 """
-function lambda(Td::AbstractFloat)
+function lambda(Td)
     return 1.0
 end
 
 """
-    dLAIdt(LAI::AbstractFloat, dens::AbstractFloat, N::AbstractFloat, lambda_::AbstractFloat, dNdt_::AbstractFloat, parameters::TOMGRO_parameters)
+    dLAIdt(LAI, dens, N, lambda_, dNdt_, parameters::TOMGRO_parameters)
 Compute derivative of LAI; see Jones(1999).
 
 # Arguments
@@ -76,7 +76,7 @@ Compute derivative of LAI; see Jones(1999).
 # Returns
 - derivative of LAI
 """
-function dLAIdt(LAI::AbstractFloat, dens::AbstractFloat, N::AbstractFloat, lambda_::AbstractFloat, dNdt_::AbstractFloat, parameters::TOMGRO_parameters)
+function dLAIdt(LAI, dens, N, lambda_, dNdt_, parameters::TOMGRO_parameters)
     if LAI > parameters.LAImax
         return 0.0
     else
@@ -86,7 +86,7 @@ function dLAIdt(LAI::AbstractFloat, dens::AbstractFloat, N::AbstractFloat, lambd
 end
 
 """
-    dWdt(LAI::AbstractFloat, dWfdt_::AbstractFloat, GRnet_::AbstractFloat, dens::AbstractFloat, dNdt_::AbstractFloat, parameters::TOMGRO_parameters)
+    dWdt(LAI, dWfdt_, GRnet_, dens, dNdt_, parameters::TOMGRO_parameters)
 Compute total dry weight growth rate; see Jones(1999).
 
 # Arguments
@@ -100,7 +100,7 @@ Compute total dry weight growth rate; see Jones(1999).
 # Returns
 - above-ground dry weight growth rate
 """
-function dWdt(LAI::AbstractFloat, dWfdt_::AbstractFloat, GRnet_::AbstractFloat, dens::AbstractFloat, dNdt_::AbstractFloat, parameters::TOMGRO_parameters)
+function dWdt(LAI, dWfdt_, GRnet_, dens, dNdt_, parameters::TOMGRO_parameters)
     if LAI >= parameters.LAImax
         p1 = 2.0 # Jones(1999)
     else
@@ -110,7 +110,7 @@ function dWdt(LAI::AbstractFloat, dWfdt_::AbstractFloat, GRnet_::AbstractFloat, 
 end
 
 """
-    Df(T::AbstractFloat)
+    Df(T)
 Compute fruit development rate, depending on temperature; see Jones(1991).
 
 # Arguments
@@ -119,7 +119,7 @@ Compute fruit development rate, depending on temperature; see Jones(1991).
 # Returns
 - fruit development rate
 """
-function Df(T::AbstractFloat)
+function Df(T)
     if 9 < T <= 28
         return 0.0017 * T - 0.015
     elseif 28 < T <= 35
@@ -130,7 +130,7 @@ function Df(T::AbstractFloat)
 end
 
 """
-    dWmdt(Df_::AbstractFloat, Wf::AbstractFloat, Wm::AbstractFloat, N::AbstractFloat)
+    dWmdt(Df_, Wf, Wm, N)
 Compute the mature fruit growth rate; see Jones(1999).
 
 # Arguments
@@ -142,7 +142,7 @@ Compute the mature fruit growth rate; see Jones(1999).
 # Returns
 - mature fruit growth rate
 """
-function dWmdt(Df_::AbstractFloat, Wf::AbstractFloat, Wm::AbstractFloat, N::AbstractFloat)
+function dWmdt(Df_, Wf, Wm, N)
     NFF = 22.0 # Jones(1999)
     kF = 5.0 # Jones(1999)
     if N <= NFF + kF
@@ -153,7 +153,7 @@ function dWmdt(Df_::AbstractFloat, Wf::AbstractFloat, Wm::AbstractFloat, N::Abst
 end
 
 """
-    fR(N::AbstractFloat)
+    fR(N)
 Compute fraction partitioning of biomass to roots; see Jones(1991).
 
 # Arguments
@@ -162,7 +162,7 @@ Compute fraction partitioning of biomass to roots; see Jones(1991).
 # Returns
 - root fraction value
 """
-function fR(N::AbstractFloat)
+function fR(N)
     if N >= 30.0
         return 0.07
     else
@@ -171,7 +171,7 @@ function fR(N::AbstractFloat)
 end
 
 """
-    LFmax(CO2::AbstractFloat, parameters::TOMGRO_parameters)
+    LFmax(CO2, parameters)
 Compute the maximum leaf photosynthetic rate; see Jones(1991).
 
 # Arguments
@@ -181,12 +181,12 @@ Compute the maximum leaf photosynthetic rate; see Jones(1991).
 # Returns
 - maximum leaf photosynthetic rate
 """
-function LFmax(CO2::AbstractFloat, parameters::TOMGRO_parameters)
+function LFmax(CO2, parameters)
     return parameters.tau * CO2
 end
 
 """
-    PGRED(T::AbstractFloat)
+    PGRED(T)
 Compute photosynthetic rate reduction factor under suboptimal temperatures.
 
 # Arguments
@@ -195,7 +195,7 @@ Compute photosynthetic rate reduction factor under suboptimal temperatures.
 # Returns
 - temperature-based reduction factor
 """
-function PGRED(T::AbstractFloat)
+function PGRED(T)
     if 0 < T <= 12
         return T / 12.0
     elseif 12 < T < 35
@@ -206,7 +206,7 @@ function PGRED(T::AbstractFloat)
 end
 
 """
-    Pg(LFmax_::AbstractFloat, PGRED_::AbstractFloat, PPFD::AbstractFloat, LAI::AbstractFloat, parameters::TOMGRO_parameters)
+    Pg(LFmax_, PGRED_, PPFD, LAI, parameters::TOMGRO_parameters)
 Compute photosynthesis rate; see Jones(1991).
 
 # Arguments
@@ -219,7 +219,7 @@ Compute photosynthesis rate; see Jones(1991).
 # Returns
 - photosynthesis rate
 """
-function Pg(LFmax_::AbstractFloat, PGRED_::AbstractFloat, PPFD::AbstractFloat, LAI::AbstractFloat, parameters::TOMGRO_parameters)
+function Pg(LFmax_, PGRED_, PPFD, LAI, parameters::TOMGRO_parameters)
     D = 2.593 # coefficient to convert Pg from CO2 to CH2O
     m = 0.1 # leaf light transmission coefficient
     a = D * LFmax_ * PGRED_ / parameters.K
@@ -229,7 +229,7 @@ function Pg(LFmax_::AbstractFloat, PGRED_::AbstractFloat, PPFD::AbstractFloat, L
 end
 
 """
-    Rm(T::AbstractFloat, W::AbstractFloat, Wm::AbstractFloat)
+    Rm(T, W, Wm)
 Compute maintenance respiration rate; see Jones(1999).
 
 # Arguments
@@ -240,14 +240,14 @@ Compute maintenance respiration rate; see Jones(1999).
 # Returns
 - maintenance respiration rate
 """
-function Rm(T::AbstractFloat, W::AbstractFloat, Wm::AbstractFloat)
+function Rm(T, W, Wm)
     Q10 = 1.4 # Jones(1991)
     rm = 0.016 # Jones(1991)
     return Q10^((T - 20) / 10) * rm * (W - Wm)
 end
 
 """
-    GRnet(Pg_::AbstractFloat, Rm_::AbstractFloat, fR_::AbstractFloat)
+    GRnet(Pg_, Rm_, fR_)
 Compute net above-ground growth rate.
 
 # Arguments
@@ -258,13 +258,13 @@ Compute net above-ground growth rate.
 # Returns
 - net growth rate
 """
-function GRnet(Pg_::AbstractFloat, Rm_::AbstractFloat, fR_::AbstractFloat)
+function GRnet(Pg_, Rm_, fR_)
     E = 0.717 # Dimokas(2009)
     return max(0, E * (Pg_ - Rm_) * (1 - fR_))
 end
 
 """
-    fF(Td::AbstractFloat)
+    fF(Td)
 Compute fruit partitioning factor; Jones(1991).
 
 # Arguments
@@ -273,7 +273,7 @@ Compute fruit partitioning factor; Jones(1991).
 # Returns
 - fruit partitioning factor
 """
-function fF(Td::AbstractFloat)
+function fF(Td)
     if 8 < Td <= 28
         return 0.0017 * Td - 0.0147
     elseif Td > 28
@@ -284,7 +284,7 @@ function fF(Td::AbstractFloat)
 end
 
 """
-    g(T_daytime::AbstractFloat, parameters::TOMGRO_parameters)
+    g(T_daytime, parameters::TOMGRO_parameters)
 Compute growth reduction factor due to high daytime temperature; see Jones(1999).
 
 # Arguments
@@ -294,7 +294,7 @@ Compute growth reduction factor due to high daytime temperature; see Jones(1999)
 # Returns
 - growth reduction factor
 """
-function g(T_daytime::AbstractFloat, parameters::TOMGRO_parameters)
+function g(T_daytime, parameters::TOMGRO_parameters)
     if T_daytime < parameters.T_CRIT
         return 0.0
     else
@@ -303,7 +303,7 @@ function g(T_daytime::AbstractFloat, parameters::TOMGRO_parameters)
 end
 
 """
-    dWfdt(GRnet_::AbstractFloat, fF_::AbstractFloat, N::AbstractFloat, g_::AbstractFloat, parameters::TOMGRO_parameters)
+    dWfdt(GRnet_, fF_, N, g_, parameters::TOMGRO_parameters)
 Compute the growth rate of fruit dry weight; see Jones(1999).
 
 # Arguments
@@ -316,7 +316,7 @@ Compute the growth rate of fruit dry weight; see Jones(1999).
 # Returns
 - fruit dry weight growth rate
 """
-function dWfdt(GRnet_::AbstractFloat, fF_::AbstractFloat, N::AbstractFloat, g_::AbstractFloat, parameters::TOMGRO_parameters)
+function dWfdt(GRnet_, fF_, N, g_, parameters::TOMGRO_parameters)
     NFF = 22.0 # nodes per plant when first fruit appears
     # fF_ = 0.5
     if N <= NFF

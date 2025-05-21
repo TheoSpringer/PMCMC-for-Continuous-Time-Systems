@@ -92,7 +92,7 @@ const Wf_init = 0.0
 """
 ## TOMGRO State
 
-Holds the state of the TOMGRO simulation, including historical data.
+Holds the state of the TOMGRO simulation.
 
 - `N`: number of nodes on mainstem
 - `LAI`: leaf area index

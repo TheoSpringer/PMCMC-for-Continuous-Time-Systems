@@ -10,7 +10,7 @@ Plots the simulation history.
 It constructs time series for the state variables (mB, tau, I50B) and the input variables (theta, D, R, CO2)
 using the data from each timestep.
 """
-function plot_history(states::Vector{SIMPLE_state}, inputs::Vector{SIMPLE_input})
+function plot_history(states::Vector{<:SIMPLE_state}, inputs::Vector{<:SIMPLE_input})
     # Time axis (assumes the same number of states and inputs)
     t = 1:length(states)
 

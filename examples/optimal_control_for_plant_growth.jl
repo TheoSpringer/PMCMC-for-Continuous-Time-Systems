@@ -46,7 +46,8 @@ Q = Diagonal([0.01^2, 0.1^2, 0.1^2]) # variance of process noise
 sample_v_theta(theta, N) = rand(MvNormal(zeros(n_x), Q), N) # sample process noise
 
 # Measurement function - assumed to be known (without loss of generality).
-g_theta(theta, x, u) = [1 0 0; 0 1 0] * x # observation function
+const C = [1.0 0 0; 0 1 0]
+g_theta(theta, x, u) = C * x # observation function
 
 # Zero-mean Gaussian measurement noise with known variance R - normalizing factors are ommited as they cancel out in the acceptance ratio.
 R = Diagonal([0.1^2, 1^2]) # variance of zero-mean Gaussian measurement noise
@@ -251,4 +252,21 @@ K_pre_solve = 10 # number of samples used to pre-solve the OCP to get a good ini
 Ipopt_options = Dict("max_iter" => 10000, "tol" => 1e-8, "hsllib" => HSL_jll.libhsl_path, "linear_solver" => "ma57")
 
 # Start optimization.
-PMMHopt.solve_PMMH_OCP(PMMH_samples, n_y, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, H, J::Function, h_scenario::Function, h_u::Function; K_pre_solve=K_pre_solve, solver_opts=Ipopt_options)
+# u_opt, x_opt, y_opt, J_opt = PMMHopt.solve_PMMH_OCP(PMMH_samples, n_y, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; K_pre_solve=K_pre_solve, solver_opts=Ipopt_options)[1:4]
+u_init = zeros(n_u, H) # initial guess for the input trajectory
+u_opt, x_opt, y_opt, J_opt = PMMHopt.solve_PMMH_OCP(PMMH_samples, n_y, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; u_init=u_init, solver_opts=Ipopt_options)[1:4]
+
+# Apply optimal input trajectory to the system and simulate forward.
+y_sys = Array{Float64}(undef, n_y, H)
+x_sys = Array{Float64}(undef, n_x, H)
+x_sys[:, 1] = x_training[:, end]
+u_sys = u_opt
+for t in 1:H
+    if t >= 2
+        x_sys[:, t] = f_true(x_sys[:, t-1], u_sys[:, t-1]) + sample_v_true(1)
+    end
+    y_sys[:, t] = g_true(x_sys[:, t], u_sys[:, t]) + sample_w_true(1)
+end
+
+# Plot predictions.
+plot_predictions(y_opt, y_sys)

@@ -106,7 +106,7 @@ function get_yield(parameters::SIMPLE_parameters, state::SIMPLE_state)
 end
 
 """
-    f_theta(theta::AbstractVector{<:AbstractFloat}, x::Union{AbstractVector{<:AbstractFloat},AbstractMatrix{<:AbstractFloat}}, u::Union{AbstractVector{<:AbstractFloat},AbstractMatrix{<:AbstractFloat}})
+    f_theta(theta, x, u)
 
 Wrapper function that simulates the model one step and takes vectors as inputs, which is useful for vectorized operations, e.g., in the particle filter.
 The harvest index is not included in the parameter vector as it is not relevant for the dynamics.
@@ -120,9 +120,11 @@ A constant high CO₂ concentration of 700 ppm is assumed reducing the number of
 # Returns
 - state vector at the next time step
 """
-function f_theta(theta::AbstractVector{<:AbstractFloat}, x::Union{AbstractVector{<:AbstractFloat},AbstractMatrix{<:AbstractFloat},Vector{VariableRef}}, u::Union{AbstractVector{<:AbstractFloat},AbstractMatrix{<:AbstractFloat},Vector{VariableRef}})
-    # Unpack the parameters
-    # parameters = SIMPLE_parameters(theta[1], theta[2], theta[3], theta[4], theta[5], theta[6], theta[7], theta[8], theta[9], theta[10], theta[11], theta[12], 0.0)
+function f_theta end
+
+function f_theta(theta::AbstractVector{<:AbstractFloat},
+    x::Union{AbstractVector{<:AbstractFloat},AbstractMatrix{<:AbstractFloat}},
+    u::Union{AbstractVector{<:AbstractFloat},AbstractMatrix{<:AbstractFloat}})
 
     parameters = SIMPLE_parameters(theta[1], theta[2], 6.0, 26.0, 1.00 * 1e-3, 100.0, 5.0, 32.0, 45.0, 0.07, 2.5, 0.95, 0.68)
 
@@ -132,7 +134,7 @@ function f_theta(theta::AbstractVector{<:AbstractFloat}, x::Union{AbstractVector
     for i = 1:N
         # Convert x and u from vector notation to the corresponding structs.
         state = SIMPLE_state(x[1, i], x[2, i], x[3, i])
-        input = SIMPLE_input(u[1, i], u[2, i], u[3, i], 700)
+        input = SIMPLE_input(u[1, i], u[2, i], u[3, i], 700.0)
 
         # Update the state.
         updated_state = step(parameters, state, input)
@@ -143,3 +145,28 @@ function f_theta(theta::AbstractVector{<:AbstractFloat}, x::Union{AbstractVector
 
     return x_next
 end
+
+function f_theta(theta::AbstractVector{<:AbstractFloat},
+    x::Union{AbstractVector{<:JuMP.AbstractJuMPScalar},AbstractMatrix{<:JuMP.AbstractJuMPScalar}},
+    u::Union{AbstractVector{<:JuMP.AbstractJuMPScalar},AbstractMatrix{<:JuMP.AbstractJuMPScalar}})
+
+    parameters = SIMPLE_parameters(theta[1], theta[2], 6.0, 26.0, 1.00 * 1e-3, 100.0, 5.0, 32.0, 45.0, 0.07, 2.5, 0.95, 0.68)
+
+    N = size(x, 2)
+    x_next = Array{JuMP.AbstractJuMPScalar}(undef, size(x)...)
+
+    for i = 1:N
+        # Convert x and u from vector notation to the corresponding structs.
+        state = SIMPLE_state(x[1, i], x[2, i], x[3, i])
+        input = SIMPLE_input(u[1, i], u[2, i], u[3, i], 700.0)
+
+        # Update the state.
+        updated_state = step(parameters, state, input)
+
+        # Convert the updated state back to a vector.
+        x_next[:, i] = [updated_state.mB; updated_state.tau; updated_state.I50B]
+    end
+
+    return x_next
+end
+
