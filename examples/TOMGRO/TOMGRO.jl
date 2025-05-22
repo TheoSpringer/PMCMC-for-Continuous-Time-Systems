@@ -78,10 +78,10 @@ end
 Initial values for model state variables.
 
 - `N`: number of nodes on mainstem
-- `LAI`: leaf area index
-- `W`: above-ground dry weight
-- `Wm`: mature fruit dry weight
-- `Wf`: total fruit dry weight
+- `LAI`: leaf area index in m²/m² (ratio of leaf area per ground area)
+- `W`: above-ground dry weight in kg/m²
+- `Wm`: mature fruit dry weight in kg/m²
+- `Wf`: total fruit dry weight in kg/m²
 """
 const N_init = 10.0
 const LAI_init = 0.05
@@ -95,10 +95,10 @@ const Wf_init = 0.0
 Holds the state of the TOMGRO simulation.
 
 - `N`: number of nodes on mainstem
-- `LAI`: leaf area index
-- `W`: above-ground dry weight
-- `Wm`: mature fruit dry weight
-- `Wf`: total fruit dry weight
+- `LAI`: leaf area index m²/m² (ratio of leaf area per ground area)
+- `W`: above-ground dry weight in kg/m²
+- `Wm`: mature fruit dry weight in kg/m²
+- `Wf`: total fruit dry weight in kg/m²
 """
 mutable struct TOMGRO_state
     N::Float64
@@ -113,9 +113,9 @@ end
 
 Holds the input of the TOMGRO simulation.
 
-- `Td`: temperature
-- `PPFDd`: photosynthetic photon flux density
-- `CO2`: CO₂ concentration
+- `Td`: temperature in °C
+- `PPFDd`: photosynthetic photon flux density (PPFD) in µmol/m²/s
+- `CO2`: CO₂ concentration in ppm
 """
 mutable struct TOMGRO_input
     Td::Float64

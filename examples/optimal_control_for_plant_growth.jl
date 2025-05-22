@@ -209,9 +209,9 @@ R_hat = PMMHopt.compute_gelman_rubin(PMMH_chains)
 
 # Revenue from selling the crops.
 # The price for the crop is set well above current prices as vertical farming is not yet economically competitive.
-price_crop = 1000 # selling price per kg/m² of crop in €
-HI = 0.68 # harvest index - proportion of total biomass that is harvestable
-revenue(mB) = price_crop * HI * mB # revenue as a function of biomass
+price_crop = 1000 # selling price of crop in €/kg
+HI = 0.68 # harvest index (proportion of total biomass that is harvestable)
+revenue(mB) = price_crop * HI * mB # revenue as a function of biomass in €/m²
 
 # Costs: heating, cooling, radiation, and irrigation.
 price_kwh = 0.14 # price per kWh in €
@@ -221,15 +221,15 @@ heat_capacity_air = 1.2e-3  # volumetric heat capacity of air in MJ/m³/K
 theta_ambient = 10.0  # ambient temperature in °C
 theta_max = 35.0  # maximum temperature in °C
 c_theta = heat_capacity_air .* price_MJ ./ (theta_max .- theta_ambient) # coefficient for heating/cooling cost
-cost_heating(theta) = c_theta .* (theta .- theta_ambient) # heating cost as a function of air temperature
+cost_heating(theta) = c_theta .* (theta .- theta_ambient) # heating cost as a function of air temperature in €/m²
 
-cost_radiation(R) = price_MJ * R # cost of radiation as a function of radiation
+cost_radiation(R) = price_MJ * R # cost of radiation as a function of radiation in €/m²
 
 c_d = 0.02 # cost coefficient for irrigation cost
-cost_irrigation(D) = c_d .* (D .- 1) .^ 2 # cost of irrigation as a function of the relative level of drought
+cost_irrigation(D) = c_d .* (D .- 1) .^ 2 # cost of irrigation as a function of the relative level of drought in €/m²
 
-# Cost function (negative profit).
-J(u, x, y) = -revenue(x[1, end]) .+ sum(cost_heating(u[1, :]) .+ cost_radiation(u[3, :]) .+ cost_irrigation(u[2, :])) # total revenue
+# Cost function (negative profit in €/m²).
+J(u, x, y) = -revenue(x[1, end]) .+ sum(cost_heating(u[1, :]) .+ cost_radiation(u[3, :]) .+ cost_irrigation(u[2, :]))
 
 # Scenario dependent constraints for u, x, and y.
 h_scenario(u, x, y) = 0.0
@@ -257,16 +257,32 @@ U_init = zeros(n_u, H) # initial guess for the input trajectory
 U_opt, X_opt, Y_opt, J_opt = PMMHopt.solve_PMMH_OCP(PMMH_samples, n_y, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; U_init=U_init, solver_opts=Ipopt_options)[1:4]
 
 # Apply optimal input trajectory to the system and simulate forward.
-y_true = Array{Float64}(undef, n_y, H)
-x_true = Array{Float64}(undef, n_x, H)
-x_true[:, 1] = x_test[:, 1]
-u_true = U_opt
+y_true_opt = Array{Float64}(undef, n_y, H)
+x_true_opt = Array{Float64}(undef, n_x, H)
+x_true_opt[:, 1] = x_test[:, 1]
+u_true_opt = U_opt
 for t in 2:H
-    x_true[:, t] = f_true(x_true[:, t-1], u_true[:, t-1]) + sample_v_true(1)
+    x_true_opt[:, t] = f_true(x_true_opt[:, t-1], u_true_opt[:, t-1]) + sample_v_true(1)
 end
 for t in 1:H
-    y_true[:, t] = g_true(x_true[:, t], u_true[:, t]) + sample_w_true(1)
+    y_true_opt[:, t] = g_true(x_true_opt[:, t], u_true_opt[:, t]) + sample_w_true(1)
 end
+J_true_opt = J(u_true_opt, x_true_opt, y_true_opt)
+@printf("Cost of optimal input trajectory: %.2f\n", J_true_opt)
 
 # Plot predictions.
-plot_predictions(Y_opt, y_true)
+plot_predictions(Y_opt, y_true_opt)
+
+# Apply initial input trajectory to the system and simulate forward for comparison.
+y_true_init = Array{Float64}(undef, n_y, H)
+x_true_init = Array{Float64}(undef, n_x, H)
+x_true_init[:, 1] = x_test[:, 1]
+u_true_init = U_init
+for t in 2:H
+    x_true_init[:, t] = f_true(x_true_init[:, t-1], u_true_init[:, t-1]) + sample_v_true(1)
+end
+for t in 1:H
+    y_true_init[:, t] = g_true(x_true_init[:, t], u_true_init[:, t]) + sample_w_true(1)
+end
+J_true_init = J(u_true_init, x_true_init, y_true_init)
+@printf("Cost of initial input trajectory: %.2f\n", J_true_init)

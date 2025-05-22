@@ -75,9 +75,9 @@ end
 ## Initial State
 Initial values for model state variables.
 
-- `mB`: biomass
-- `tau`: cumulative temperature
-- `I50B`: leaf senescence
+- `mB`: biomass in kg/m²
+- `tau`: cumulative temperature in °C d
+- `I50B`: leaf senescence °C d
 """
 const mB_init = 0.0
 const tau_init = 0.0
@@ -88,9 +88,9 @@ const I50B_init = 400.0 # I50B parameter in paper
 
 Holds the state of the SIMPLE simulation.
 
-- `mB`: biomass
-- `tau`: cumulative temperature
-- `I50B`: leaf senescence
+- `mB`: biomass in kg/m²
+- `tau`: cumulative temperature in °C d
+- `I50B`: leaf senescence in °C d
 """
 mutable struct SIMPLE_state{T1,T2,T3}
     mB::T1
@@ -103,10 +103,10 @@ end
 
 Holds the input of the SIMPLE simulation.
 
-- `theta`: temperature
+- `theta`: temperature in °C
 - `D`: relative level of drought (ARID index); see Woli (2012) 
-- `R`: radiation
-- `CO2`: atmospheric CO₂ concentration
+- `R`: solar radiation in MJ/m²/d
+- `CO2`: atmospheric CO₂ concentration in ppm
 """
 mutable struct SIMPLE_input{T1,T2,T3,T4}
     theta::T1
