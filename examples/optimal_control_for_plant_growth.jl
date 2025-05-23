@@ -209,7 +209,7 @@ R_hat = PMMHopt.compute_gelman_rubin(PMMH_chains)
 
 # Revenue from selling the crops.
 # The price for the crop is set well above current prices as vertical farming is not yet economically competitive.
-price_crop = 1000 # selling price of crop in €/kg
+price_crop = 10000 # selling price of crop in €/kg
 HI = 0.68 # harvest index (proportion of total biomass that is harvestable)
 revenue(mB) = price_crop * HI * mB # revenue as a function of biomass in €/m²
 
@@ -256,33 +256,57 @@ Ipopt_options = Dict("max_iter" => 10000, "tol" => 1e-8, "hsllib" => HSL_jll.lib
 U_init = zeros(n_u, H) # initial guess for the input trajectory
 U_opt, X_opt, Y_opt, J_opt = PMMHopt.solve_PMMH_OCP(PMMH_samples, n_y, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; U_init=U_init, solver_opts=Ipopt_options)[1:4]
 
-# Apply optimal input trajectory to the system and simulate forward.
+# Generate noise realizations for the simulations.
+V = sample_v_theta(theta_true, H)
+W = sample_w_theta(theta_true, H)
+
+# Simulate the system forward using the optimized input trajectory.
 y_true_opt = Array{Float64}(undef, n_y, H)
 x_true_opt = Array{Float64}(undef, n_x, H)
 x_true_opt[:, 1] = x_test[:, 1]
 u_true_opt = U_opt
 for t in 2:H
-    x_true_opt[:, t] = f_true(x_true_opt[:, t-1], u_true_opt[:, t-1]) + sample_v_true(1)
+    x_true_opt[:, t] = f_true(x_true_opt[:, t-1], u_true_opt[:, t-1]) + V[:, t-1]
 end
 for t in 1:H
-    y_true_opt[:, t] = g_true(x_true_opt[:, t], u_true_opt[:, t]) + sample_w_true(1)
+    y_true_opt[:, t] = g_true(x_true_opt[:, t], u_true_opt[:, t]) + W[:, t]
 end
-J_true_opt = J(u_true_opt, x_true_opt, y_true_opt)
-@printf("Cost of optimal input trajectory: %.2f\n", J_true_opt)
+J_true_opt = -J(u_true_opt, x_true_opt, y_true_opt)
 
 # Plot predictions.
 plot_predictions(Y_opt, y_true_opt)
 
-# Apply initial input trajectory to the system and simulate forward for comparison.
+# Simulate the system forward using the initialization of the optimal control problem as input trajectory.
 y_true_init = Array{Float64}(undef, n_y, H)
 x_true_init = Array{Float64}(undef, n_x, H)
 x_true_init[:, 1] = x_test[:, 1]
 u_true_init = U_init
 for t in 2:H
-    x_true_init[:, t] = f_true(x_true_init[:, t-1], u_true_init[:, t-1]) + sample_v_true(1)
+    x_true_init[:, t] = f_true(x_true_init[:, t-1], u_true_init[:, t-1]) + V[:, t-1]
 end
 for t in 1:H
-    y_true_init[:, t] = g_true(x_true_init[:, t], u_true_init[:, t]) + sample_w_true(1)
+    y_true_init[:, t] = g_true(x_true_init[:, t], u_true_init[:, t]) + W[:, t]
 end
-J_true_init = J(u_true_init, x_true_init, y_true_init)
-@printf("Cost of initial input trajectory: %.2f\n", J_true_init)
+J_true_init = -J(u_true_init, x_true_init, y_true_init)
+
+# Optimal profit (assuming perfect knowledge of the system and noise realizations).
+PMMH_true_system = [PMMH_sample(theta_true, x_training[:, end], [1.0], u_training[:, end], x_0_true, [1.0])]
+
+U_known_system, X_known_system, Y_known_system, J_known_system = PMMHopt.solve_PMMH_OCP(PMMH_true_system, n_y, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; X_t=x_test[:, 1], V=V, W=W, U_init=U_opt, solver_opts=Ipopt_options)[1:4]
+
+y_true_known_system = Array{Float64}(undef, n_y, H)
+x_true_known_system = Array{Float64}(undef, n_x, H)
+x_true_known_system[:, 1] = x_test[:, 1]
+u_true_known_system = U_known_system
+for t in 2:H
+    x_true_known_system[:, t] = f_true(x_true_known_system[:, t-1], u_true_known_system[:, t-1]) + V[:, t-1]
+end
+for t in 1:H
+    y_true_known_system[:, t] = g_true(x_true_known_system[:, t], u_true_known_system[:, t]) + W[:, t]
+end
+J_true_known_system = -J(u_true_known_system, x_true_known_system, y_true_known_system)
+
+# Compare costs.
+@printf("Profit of optimized input trajectory: %.2f\n", J_true_opt)
+@printf("Profit of the initialization of the OCP: %.2f\n", J_true_init)
+@printf("Optimal profit (assuming perfect knowledge of the system and noise realizations): %.2f\n", J_true_known_system)

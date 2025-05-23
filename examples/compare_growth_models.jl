@@ -10,9 +10,9 @@ days = 100  # number of days
 # Input data for both models
 T = fill(25.0, days)
 D = fill(0.0, days)
-R = fill(25.0, days)
+R = fill(17.5, days)
 PPFD = TOMGRO.radiation2ppfd(R)
-CO2 = fill(700.0, days)
+CO2 = fill(400.0, days)
 
 ######### TOMGRO Simulation #########
 parameters_TOMGRO, init_state_TOMGRO = TOMGRO.reset()

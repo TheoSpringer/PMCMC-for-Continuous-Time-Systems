@@ -523,7 +523,7 @@ function particle_MMH_blocked(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMat
                 PMMH_samples[current_sample].w_m1 .= w[end, :]
                 PMMH_samples[current_sample].u_m1 .= u[:, end]
                 PMMH_samples[current_sample].x_0 .= x_0
-                PMMH_samples[current_sample].w_0 .= 1
+                PMMH_samples[current_sample].w_0 .= [1.0]
                 current_sample += 1
             end
 
@@ -677,7 +677,7 @@ function staged_PMMH_blocked(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatr
         @printf("### Staged PMMH sampling complete\nRuntime: %.2f s\nAverage acceptance ratio: %.2f %%\n",
             time_sampling, average_acceptance_ratio)
     end
-    
+
     return PMMH_samples, acceptance_ratio, time_sampling
 end
 

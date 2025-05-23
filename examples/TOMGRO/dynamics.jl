@@ -23,9 +23,9 @@ Compute scaling fN, which modifies the node development rate depending on the te
 - scaling fN
 """
 function fN(T)
-    if 12 < T <= 28
+    if 12.0 < T <= 28.0
         return 1.0 + 0.0281 * (T - 28)
-    elseif 28 < T < 50
+    elseif 28.0 < T < 50.0
         return 1.0 - 0.0455 * (T - 28)
     else
         return 0.0
@@ -106,7 +106,9 @@ function dWdt(LAI, dWfdt_, GRnet_, dens, dNdt_, parameters::TOMGRO_parameters)
     else
         p1 = 0.0
     end
-    return min(dWfdt_ + (parameters.Vmax - p1) * dens * dNdt_, GRnet_ - p1 * dens * dNdt_)
+    a = dWfdt_ + (parameters.Vmax - p1) * dens * dNdt_
+    b = GRnet_ - p1 * dens * dNdt_
+    return min(a, b)
 end
 
 """
@@ -120,9 +122,9 @@ Compute fruit development rate, depending on temperature; see Jones(1991).
 - fruit development rate
 """
 function Df(T)
-    if 9 < T <= 28
+    if 9.0 < T <= 28.0
         return 0.0017 * T - 0.015
-    elseif 28 < T <= 35
+    elseif 28.0 < T <= 35.0
         return 0.032
     else
         return 0.0
@@ -196,9 +198,9 @@ Compute photosynthetic rate reduction factor under suboptimal temperatures.
 - temperature-based reduction factor
 """
 function PGRED(T)
-    if 0 < T <= 12
-        return T / 12.0
-    elseif 12 < T < 35
+    if 0.0 < T <= 12.0
+        return 1.0 / 12.0 * T
+    elseif 12.0 < T < 35.0
         return 1.0
     else
         return 0.0
@@ -220,11 +222,11 @@ Compute photosynthesis rate; see Jones(1991).
 - photosynthesis rate
 """
 function Pg(LFmax_, PGRED_, PPFD, LAI, parameters::TOMGRO_parameters)
-    D = 2.593 # coefficient to convert Pg from CO2 to CH2O
+    D = 2.593 # coefficient to convert Pg from CO₂ to CH₂O
     m = 0.1 # leaf light transmission coefficient
     a = D * LFmax_ * PGRED_ / parameters.K
     b = log(((1 - m) * LFmax_ + parameters.Qe * parameters.K * PPFD) /
-            ((1 - m) * LFmax_ + parameters.Qe * parameters.K * PPFD * exp(-parameters.K * LAI)))
+            ((1 - m) * LFmax_ + parameters.Qe * parameters.K * PPFD * exp(-1 * parameters.K * LAI)))
     return a * b
 end
 
@@ -260,7 +262,7 @@ Compute net above-ground growth rate.
 """
 function GRnet(Pg_, Rm_, fR_)
     E = 0.717 # Dimokas(2009)
-    return max(0, E * (Pg_ - Rm_) * (1 - fR_))
+    return max(0.0, E * (Pg_ - Rm_) * (1 - fR_))
 end
 
 """
@@ -274,9 +276,9 @@ Compute fruit partitioning factor; Jones(1991).
 - fruit partitioning factor
 """
 function fF(Td)
-    if 8 < Td <= 28
+    if 8.0 < Td <= 28.0
         return 0.0017 * Td - 0.0147
-    elseif Td > 28
+    elseif 28.0 < Td
         return 0.032
     else
         return 0.0
@@ -318,7 +320,7 @@ Compute the growth rate of fruit dry weight; see Jones(1999).
 """
 function dWfdt(GRnet_, fF_, N, g_, parameters::TOMGRO_parameters)
     NFF = 22.0 # nodes per plant when first fruit appears
-    # fF_ = 0.5
+    fF_ = 0.5
     if N <= NFF
         return 0.0
     end

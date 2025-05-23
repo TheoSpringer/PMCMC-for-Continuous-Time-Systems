@@ -8,6 +8,7 @@ It models various aspects of plant development, including node formation, leaf a
 - [Code Reference](https://gist.github.com/gyosit/abeab4e595d7ddcd65b55c1270d240c8)
 - Jones, J. W., A. Kenig, and C. E. Vallejos. "Reduced state–variable tomato growth model." Transactions of the ASAE 42.1 (1999): 255-265.
 - Jones, James W., et al. "A dynamic tomato growth and yield model (TOMGRO)." Transactions of the ASAE 34.2 (1991): 663-0672.
+- Ramirez, A., et al. "Calibration and validation of complex and simplified tomato growth models for control purposes in the southeast of Spain." International Workshop on Models for Plant Growth and Control of Product Quality in Horticultural Production 654. 2003.
 - Dimokas, George, Marc Tchamitchian, and Constantin Kittas. "Calibration and validation of a biological model to simulate the development and production of tomatoes in Mediterranean greenhouses during winter period." biosystems engineering 103.2 (2009): 217-227.
 - Heuvelink, Egbert, and Nadia Bertin. "Dry-matter partitioning in a tomato crop: comparison of two simulation models." Journal of horticultural science 69.5 (1994): 885-903.
 """
@@ -20,19 +21,19 @@ export TOMGRO_parameters, TOMGRO_state, TOMGRO_input, reset, step!, plot_history
 ## Model Parameters
 Holds the parameters of the TOMGRO simulation.
 
-- `Nm`: maximum rate of node appearance (at optimal temperatures)
-- `Nb`: coefficient in expolinear equation, projection of linear segment of LAI vs N to horizontal axis
-- `sigma`: maximum leaf area expansion per node, coefficient in expolinear equation
-- `beta`: coefficient in expolinear equation
-- `Vmax`: maximum increase in vegetative tissue dry weight growth per node
-- `Qe`: leaf quantum efficiency
-- `tau`: carbon dioxide use efficiency
-- `K`: light extinction coefficient
-- `CE`: conversion coefficient for assimilated carbon into dry matter
-- `T_CRIT`: mean daytime temperature above which fruit abortion starts
-- `alpha_F`: maximum partitioning of new growth to fruit
-- `v`: transition coefficient governing the shift between vegetative and reproductive growth phases
-- `LAImax`: maximum leaf area index
+- `Nm`: maximum rate of node appearance (at optimal temperatures) in nodes/day
+- `Nb`: coefficient in expolinear equation, projection of the linear segment of LAI vs node number to the horizontal axis, in nodes
+- `sigma`: maximum leaf area expansion per node, coefficient in expolinear equation, in m²/node
+- `beta`: coefficient in expolinear equation, in 1/node
+- `Vmax`: maximum increase in vegetative tissue dry weight growth per node, in g/node
+- `Qe`: leaf quantum efficiency, in µmol(CO₂)/µmol(photons)
+- `tau`: carbon dioxide use efficiency, in µmol(CO₂)/m²/s/ppm(CO₂)
+- `K`: light extinction coefficient, dimensionless
+- `CE`: conversion coefficient for assimilated carbon into dry matter, in g(tissue)/g(CH₂O)
+- `T_CRIT`: mean daytime temperature above which fruit abortion starts, in °C
+- `alpha_F`: maximum partitioning of new growth to fruit, in 1/day
+- `v`: transition coefficient between vegetative and full fruit growth, in 1/node
+- `LAImax`: maximum leaf area index (management), dimensionless: m²(leaf)/m²(ground)
 """
 mutable struct TOMGRO_parameters
     Nm::Float64
@@ -54,11 +55,14 @@ end
     default_parameters()
 
 Returns the default TOMGRO model parameters.
+
+## Reference
+- Ramirez, A., et al. "Calibration and validation of complex and simplified tomato growth models for control purposes in the southeast of Spain." International Workshop on Models for Plant Growth and Control of Product Quality in Horticultural Production 654. 2003.
 """
 function default_parameters()
     return TOMGRO_parameters(
         0.495,  # Nm
-        13,     # Nb
+        13.0,   # Nb
         0.041,  # sigma
         0.22,   # beta
         6.0,    # Vmax
@@ -69,7 +73,7 @@ function default_parameters()
         24.0,   # T_CRIT
         0.95,   # alpha_F
         0.24,   # v
-        6.0     # LAImax
+        6.0     # LAImax, set according to plot in Ramirez(2024)
     )
 end
 
@@ -78,10 +82,13 @@ end
 Initial values for model state variables.
 
 - `N`: number of nodes on mainstem
-- `LAI`: leaf area index in m²/m² (ratio of leaf area per ground area)
-- `W`: above-ground dry weight in kg/m²
-- `Wm`: mature fruit dry weight in kg/m²
-- `Wf`: total fruit dry weight in kg/m²
+- `LAI`: leaf area index, dimensionless: m²(leaf)/m²(ground)
+- `W`: above-ground dry weight in g/m²
+- `Wm`: mature fruit dry weight in g/m²
+- `Wf`: total fruit dry weight in g/m²
+
+## Reference
+- Ramirez, A., et al. "Calibration and validation of complex and simplified tomato growth models for control purposes in the southeast of Spain." International Workshop on Models for Plant Growth and Control of Product Quality in Horticultural Production 654. 2003.
 """
 const N_init = 10.0
 const LAI_init = 0.05
@@ -95,10 +102,10 @@ const Wf_init = 0.0
 Holds the state of the TOMGRO simulation.
 
 - `N`: number of nodes on mainstem
-- `LAI`: leaf area index m²/m² (ratio of leaf area per ground area)
-- `W`: above-ground dry weight in kg/m²
-- `Wm`: mature fruit dry weight in kg/m²
-- `Wf`: total fruit dry weight in kg/m²
+- `LAI`: leaf area index, dimensionless: m²(leaf)/m²(ground)
+- `W`: above-ground dry weight in g/m²
+- `Wm`: mature fruit dry weight in g/m²
+- `Wf`: total fruit dry weight in g/m²
 """
 mutable struct TOMGRO_state
     N::Float64

@@ -18,15 +18,15 @@ export SIMPLE_parameters, SIMPLE_state, SIMPLE_input, reset, step!, get_yield, p
 ## Model Parameters
 Holds the parameters of the SIMPLE simulation. Compared to the original paper, the I50B parameter is not included as it describes the initial state of the simulation and is not a parameter of the dynamics.
 
-- `tau_sum`: cumulative temperature requirement from sowing to maturity
-- `Ia`: cumulative temperature requirement for leaf area development to intercept 50 % of radiation
-- `theta_base`: base temperature for phenology development and growth
-- `theta_opt`: optimal temperature for biomass growth
-- `RUE`: Radiation use efficiency
-- `Iheat`: maximum daily reduction in I50B due to heat stress
-- `Iwater`: maximum daily reduction in I50B due to drought stress
-- `theta_heat`: threshold temperature to start accelerating senescence from heat stress
-- `theta_ext`: extreme temperature threshold when RUE becomes 0 due to heat stress
+- `tau_sum`: cumulative temperature requirement from sowing to maturity in °C d
+- `Ia`: cumulative temperature requirement for leaf area development to intercept 50 % of radiation in °C d
+- `theta_base`: base temperature for phenology development and growth in °C
+- `theta_opt`: optimal temperature for biomass growth in °C
+- `RUE`: Radiation use efficiency in kg/MJ/m²
+- `Iheat`: maximum daily reduction in I50B due to heat stress in °C d
+- `Iwater`: maximum daily reduction in I50B due to drought stress in °C d
+- `theta_heat`: threshold temperature to start accelerating senescence from heat stress in °C
+- `theta_ext`: extreme temperature threshold when RUE becomes 0 due to heat stress in °C
 - `Sco2`: relative increase in RUE per ppm elevated CO2 above 350 ppm
 - `Swater`: sensitivity of RUE to drought stress
 - `Rmax`: maximum fraction of radiation interception
