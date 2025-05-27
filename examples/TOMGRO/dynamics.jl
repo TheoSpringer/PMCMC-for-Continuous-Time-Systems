@@ -320,7 +320,7 @@ Compute the growth rate of fruit dry weight; see Jones(1999).
 """
 function dWfdt(GRnet_, fF_, N, g_, parameters::TOMGRO_parameters)
     NFF = 22.0 # nodes per plant when first fruit appears
-    fF_ = 0.5
+    # fF_ = 0.5
     if N <= NFF
         return 0.0
     end

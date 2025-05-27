@@ -1,3 +1,5 @@
+using Plots
+
 include("SIMPLE/SIMPLE.jl")
 include("TOMGRO/TOMGRO.jl")
 
@@ -27,7 +29,7 @@ for d in 2:days
 end
 
 # Plot TOMGRO results.
-TOMGRO.plot_history(states_TOMGRO, inputs_TOMGRO)
+# TOMGRO.plot_history(states_TOMGRO, inputs_TOMGRO)
 
 ######### SIMPLE Simulation #########
 parameters_SIMPLE, init_state_SIMPLE = SIMPLE.reset()
@@ -42,4 +44,18 @@ for d in 2:days
 end
 
 # Plot SIMPLE results.
-SIMPLE.plot_history(states_SIMPLE, inputs_SIMPLE)
+# SIMPLE.plot_history(states_SIMPLE, inputs_SIMPLE)
+
+# Compare total fresh weight of the two models.
+# Since TOMGRO uses above-ground dry weight in g/m² but SIMPLE uses (fresh) biomass in kg/m², we convert the TOMGRO output to fresh biomass in kg/m².
+W_TOMGRO = [TOMGRO.get_biomass(s) for s in states_TOMGRO]
+
+W_SIMPLE = [s.mB for s in states_SIMPLE]
+
+# Plot comparison of fresh biomass over time.
+t = 1:days
+plot(t, W_TOMGRO, label="TOMGRO", lw=2)
+plot!(t, W_SIMPLE, label="SIMPLE", lw=2)
+xlabel!("Days")
+ylabel!("Fresh Biomass (kg/m²)")
+title!("Comparison of Fresh Biomass Over Time")

@@ -130,82 +130,12 @@ u_test = u[:, T_train+1:end]
 x_test = x[:, T_train+1:end]
 y_test = y[:, T_train+1:end]
 
-# Plot data.
-#=
-plot()
-for i in 1:n_u
-    plot!(1:T_total, u[i, :], label="u_$i", lw=2, legend=:topright)
-end
-for i in 1:n_y
-    plot!(1:T_total, y[i, :], label="y_$i", lw=2)
-end
-xlabel!("t")
-ylabel!("u | y")
-=#
-
 # Run a staged PMMH sampler.
 # Aim for an acceptance ratio of around 20–30% for a random-walk proposal.
-# PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
-@load "PMMH_samples.jld2" PMMH_samples
+PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
+# @load "PMMH_samples.jld2" PMMH_samples
 
-#=
-# In case the parameters theta and the initial state are highly correlated, e.g., due to small process noise, it may be beneficial to use a blocked PMMH sampler.
-#=
-proposal_cov_init = Diagonal(vcat(theta_var, x_0_var)) # initial proposal covariance for theta and x_0
-PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH_blocked(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_v_theta, log_pdf_w_theta, log_pdf_theta, log_pdf_x_0, theta_init, x_0_init, proposal_cov_init, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
-=#
-
-# Simulate the posterior models forward and compare to test data.
-# The predicted trajectories should track the true outputs well.
-PMMHopt.test_prediction(PMMH_samples, n_x, f_theta, g_theta, sample_v_theta, sample_w_theta, 1, u_test, y_test)
-
-# Plot the autocorrelation function (ACF) of the samples.
-# A well-mixed chain will show fast decay of autocorrelation. After thinning, the ACF should be near zero even at small lags.
-PMMHopt.plot_autocorrelation(PMMH_samples; max_lag=200)
-
-# Compute the effective sample size (ESS).
-# The ESS indicates how many effectively independent samples were drawn. Ideally, after thinning, ESS should approach K.
-# The goal of tuning is to maximize the ESS per second.
-ess = PMMHopt.compute_ess(PMMH_samples; max_lag=200)
-@printf("Minimum ESS: %.1f (= %.2f / s)\n", minimum(ess), minimum(ess) / time_sampling)
-
-# Plot the parameter and latent state trace.
-# The trace should appear stationary and show no long-term trends after burn-in. Jump sizes should look reasonable.
-PMMHopt.plot_parameter_trace(PMMH_samples)
-
-# Plot the posterior histogram with overlaid priors and true values (if known).
-# If the data is informative, the posterior should be tighter than the prior and centered near the true value.
-prior_pdf = Vector{Tuple{Vector{Float64},Vector{Float64}}}()
-for i in 1:length(theta_mean)
-    prior = Normal(theta_mean[i], sqrt(theta_var[i]))
-    values = range(quantile(prior, 0.01), stop=quantile(prior, 0.99), length=500)
-    push!(prior_pdf, (values, pdf(prior, values)))
-end
-for i in 1:length(x_0_mean)
-    prior = Normal(x_0_mean[i], sqrt(x_0_var[i]))
-    values = range(quantile(prior, 0.01), stop=quantile(prior, 0.99), length=500)
-    push!(prior_pdf, (values, pdf(prior, values)))
-end
-PMMHopt.plot_parameter_pdf(PMMH_samples; bins=50, prior_pdf=prior_pdf, true_values=[theta_true; x_training[:, 1]])
-
-# Optional: run multiple independent PMMH chains and compute the Gelman–Rubin statistic.
-# R̂ quantifies convergence by comparing within-chain to between-chain variance.
-# R̂ close to 1 (typically R̂ < 1.05) indicates good convergence across chains.
-#=
-M = 10 # number of independent chains
-PMMH_chains = Vector{Vector{PMMH_sample}}(undef, M)
-@threads for m in 1:M
-    theta_init = rand(MvNormal(theta_mean, Diagonal(theta_var)))
-    PMMH_chains[m] = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer)[1]
-end
-
-R_hat = PMMHopt.compute_gelman_rubin(PMMH_chains)
-@printf("Maximum R̂: %.2f\n", maximum(R_hat))
-=#
-=#
-
-### Formulate the optimal control problem (OCP) using the PMMH samples.
-# Define the cost function. Objective: maximize economic profit.
+# Formulate the optimal control problem (OCP) using the PMMH samples.
 
 # Revenue from selling the crops.
 # The price for the crop is set well above current prices as vertical farming is not yet economically competitive.
@@ -228,8 +158,9 @@ cost_radiation(R) = price_MJ * R # cost of radiation as a function of radiation 
 c_d = 0.02 # cost coefficient for irrigation cost
 cost_irrigation(D) = c_d .* (D .- 1) .^ 2 # cost of irrigation as a function of the relative level of drought in €/m²
 
-# Cost function (negative profit in €/m²).
-J(u, x, y) = -revenue(x[1, end]) .+ sum(cost_heating(u[1, :]) .+ cost_radiation(u[3, :]) .+ cost_irrigation(u[2, :]))
+# Objective: maximize profit.
+profit(u, x, y) = revenue(x[1, end]) .- sum(cost_heating(u[1, :]) .- cost_radiation(u[3, :]) .- cost_irrigation(u[2, :])) # profit in €/m²
+J(u, x, y) = -profit(u, x, y) # cost function to be minimized (negative profit)
 
 # Scenario dependent constraints for u, x, and y.
 h_scenario(u, x, y) = 0.0
@@ -245,68 +176,80 @@ h_u(u) = [
 ]
 
 # Parameters for the OCP.
-H = 10 # time horizon in days
+H = 40 # time horizon in days
 K_pre_solve = 10 # number of samples used to pre-solve the OCP to get a good initial guess
 
 # Ipopt options
-Ipopt_options = Dict("max_iter" => 10000, "tol" => 1e-8, "hsllib" => HSL_jll.libhsl_path, "linear_solver" => "ma57")
+Ipopt_options = Dict("max_iter" => 100000, "tol" => 1e-8, "hsllib" => HSL_jll.libhsl_path, "linear_solver" => "ma57")
 
 # Start optimization.
 # u_opt, x_opt, y_opt, J_opt = PMMHopt.solve_PMMH_OCP(PMMH_samples, n_y, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; K_pre_solve=K_pre_solve, solver_opts=Ipopt_options)[1:4]
 U_init = zeros(n_u, H) # initial guess for the input trajectory
 U_opt, X_opt, Y_opt, J_opt = PMMHopt.solve_PMMH_OCP(PMMH_samples, n_y, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; U_init=U_init, solver_opts=Ipopt_options)[1:4]
 
+# Helper function to simulate the system forward using different input trajectories and noise realizations.
+function simulate_system(f, g, x_t, u, V, W)
+    H = size(u, 2)
+    n_x = length(x_t)
+    n_y = size(W, 1)
+
+    x = Array{Float64}(undef, n_x, H)
+    y = Array{Float64}(undef, n_y, H)
+
+    x[:, 1] = x_t
+
+    for t = 2:H
+        x[:, t] = f(x[:, t-1], u[:, t-1]) + V[:, t-1]
+    end
+    for t = 1:H
+        y[:, t] = g(x[:, t], u[:, t]) + W[:, t]
+    end
+    return x, y
+end
+
 # Generate noise realizations for the simulations.
 V = sample_v_theta(theta_true, H)
 W = sample_w_theta(theta_true, H)
 
 # Simulate the system forward using the optimized input trajectory.
-y_true_opt = Array{Float64}(undef, n_y, H)
-x_true_opt = Array{Float64}(undef, n_x, H)
-x_true_opt[:, 1] = x_test[:, 1]
-u_true_opt = U_opt
-for t in 2:H
-    x_true_opt[:, t] = f_true(x_true_opt[:, t-1], u_true_opt[:, t-1]) + V[:, t-1]
-end
-for t in 1:H
-    y_true_opt[:, t] = g_true(x_true_opt[:, t], u_true_opt[:, t]) + W[:, t]
-end
-J_true_opt = -J(u_true_opt, x_true_opt, y_true_opt)
+x_true_opt, y_true_opt = simulate_system(f_true, g_true, x_test[:, 1], U_opt, V, W)
+profit_opt = profit(U_opt, x_true_opt, y_true_opt)
 
 # Plot predictions.
 plot_predictions(Y_opt, y_true_opt)
 
 # Simulate the system forward using the initialization of the optimal control problem as input trajectory.
-y_true_init = Array{Float64}(undef, n_y, H)
-x_true_init = Array{Float64}(undef, n_x, H)
-x_true_init[:, 1] = x_test[:, 1]
-u_true_init = U_init
-for t in 2:H
-    x_true_init[:, t] = f_true(x_true_init[:, t-1], u_true_init[:, t-1]) + V[:, t-1]
-end
-for t in 1:H
-    y_true_init[:, t] = g_true(x_true_init[:, t], u_true_init[:, t]) + W[:, t]
-end
-J_true_init = -J(u_true_init, x_true_init, y_true_init)
+x_true_init, y_true_init = simulate_system(f_true, g_true, x_test[:, 1], U_init, V, W)
+profit_init = profit(U_init, x_true_init, y_true_init)
 
-# Optimal profit (assuming perfect knowledge of the system and noise realizations).
+# Determine optimal profit (assuming perfect knowledge of the system and noise realizations).
 PMMH_true_system = [PMMH_sample(theta_true, x_training[:, end], [1.0], u_training[:, end], x_0_true, [1.0])]
 
 U_known_system, X_known_system, Y_known_system, J_known_system = PMMHopt.solve_PMMH_OCP(PMMH_true_system, n_y, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; X_t=x_test[:, 1], V=V, W=W, U_init=U_opt, solver_opts=Ipopt_options)[1:4]
 
-y_true_known_system = Array{Float64}(undef, n_y, H)
-x_true_known_system = Array{Float64}(undef, n_x, H)
-x_true_known_system[:, 1] = x_test[:, 1]
-u_true_known_system = U_known_system
-for t in 2:H
-    x_true_known_system[:, t] = f_true(x_true_known_system[:, t-1], u_true_known_system[:, t-1]) + V[:, t-1]
-end
-for t in 1:H
-    y_true_known_system[:, t] = g_true(x_true_known_system[:, t], u_true_known_system[:, t]) + W[:, t]
-end
-J_true_known_system = -J(u_true_known_system, x_true_known_system, y_true_known_system)
+x_true_known_system, y_true_known_system = simulate_system(f_true, g_true, x_test[:, 1], U_known_system, V, W)
+profit_known_system = profit(U_known_system, x_true_known_system, y_true_known_system)
 
 # Compare costs.
-@printf("Profit of optimized input trajectory: %.2f\n", J_true_opt)
-@printf("Profit of the initialization of the OCP: %.2f\n", J_true_init)
-@printf("Optimal profit (assuming perfect knowledge of the system and noise realizations): %.2f\n", J_true_known_system)
+@printf("Profit of optimized input trajectory:                              %.2f\n", profit_opt)
+@printf("Profit of the initialization of the OCP:                           %.2f\n", profit_init)
+@printf("Optimal profit (perfect knowledge of model + noise realization):   %.2f\n", profit_known_system)
+
+# Plot the optimal input trajectory.
+t = 1:H
+for i in 1:n_u
+    p = plot(t, U_opt[i, :], label="Optimized input trajectory", lw=2)
+    plot!(t, U_init[i, :], label="Initialization", lw=2)
+    plot!(t, U_known_system[i, :], label="Optimal input", lw=2)
+    xlabel!("Days")
+    ylabel!(i == 1 ? "Temperature (°C)" : i == 2 ? "Drought index" : "Radiation (MJ/m²/d)")
+    display(p)
+end
+
+# Plot the biomass over time.
+p = plot(t, x_true_opt[1, :], label="Biomass (optimized input)", lw=2)
+plot!(t, x_true_init[1, :], label="Biomass (initialization)", lw=2)
+plot!(t, x_true_known_system[1, :], label="Biomass (optimal input)", lw=2)
+xlabel!("Days")
+ylabel!("Fresh biomass (kg/m²)")
+display(p)

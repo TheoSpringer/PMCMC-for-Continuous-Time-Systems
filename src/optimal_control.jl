@@ -264,6 +264,10 @@ function solve_PMMH_OCP(PMMH_samples::Vector{PMMH_sample}, n_y::Int, f_theta::Fu
     iterations = MOI.get(OCP, MOI.BarrierIterations())
     mu = barrier_param_mu[end]
 
+    if !solve_successful
+        @warn("The optimization did not converge to an optimal and feasible solution. The solver returned: $(termination_status(OCP))")
+    end
+
     return U_opt, X_opt, Y_opt, J_opt, solve_successful, iterations, mu
 end
 

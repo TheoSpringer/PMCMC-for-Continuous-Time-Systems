@@ -134,3 +134,35 @@ function step(parameters::TOMGRO_parameters, state::TOMGRO_state, input::TOMGRO_
 
     return TOMGRO_state(N_next, LAI_next, W_next, Wm_next, Wf_next)
 end
+
+"""
+    get_biomass(state::TOMGRO_state)
+Returns the (fresh) biomass in kg/m² used by the SIMPLE model.
+
+# Arguments
+- `state`: current TOMGRO state
+
+# Returns
+- biomass in kg/m²
+"""
+function get_biomass(state::TOMGRO_state)
+    # Estimate total dry weight including roots from above-ground dry weight.
+    # The root-to-shoot ratio depends on species and conditions (e.g., drought).
+    # The value of 0.10 is reported in:
+    #   Thwe, Aye Aye, et al. "Dynamic shoot and root growth at different developmental stages of tomato (Solanum lycopersicum Mill.) under acute ozone stress." Scientia Horticulturae 150 (2013): 317-325.
+    RS_ratio = 0.10
+    W_total_dry_g = (1 + RS_ratio) * state.W # total dry weight including roots
+
+    # Convert total dry weight from g/m² to kg/m².
+    W_total_dry_kg = W_total_dry_g / 1000.0
+
+    # The fresh weight can be estimated from dry weight using the dry matter content (DMC).
+    # The value of 0.177 is reported in 
+    #   Ventura, Myriam Rodrigue, M. C. Pieltain, and J. I. R. Castanon. "Evaluation of tomato crop by-products as feed for goats." Animal Feed Science and Technology 154.3-4 (2009): 271-275.
+    DMC = 0.177
+
+    # Convert dry weight to fresh weight.
+    W_total_fresh = W_total_dry_kg / DMC  # fresh weight in g/m²
+
+    return W_total_fresh
+end
