@@ -11,6 +11,9 @@ using LaTeXStrings
 using Printf
 using JuMP
 using Ipopt
+import MathOptInterface as MOI
+import ForwardDiff
+using SparseArrays
 
 export PMMH_sample, particle_filter, adapt_N, particle_MMH, staged_PMMH, compute_ess, compute_gelman_rubin, epsilon, solve_PMMH_OCP, solve_PMMH_OCP_greedy_guarantees, test_prediction, plot_predictions, plot_autocorrelation, plot_parameter_trace, plot_parameter_pdf
 

@@ -24,14 +24,14 @@ function particle_filter(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<
     # Initialize and pre-allocate.
     T = size(y, 2)
     w = Array{Float64}(undef, T, N)
-    x_pf = Array{Float64}(undef, n_x, N, T)
+    x_pf = Array{Float64}(undef, n_x, T, N)
     a = Array{Int64}(undef, T, N)
     log_w = Array{Float64}(undef, 1, N)
     log_likelihood = 0.0
 
     # Sample initial states.
     for n in 1:N
-        x_pf[:, n, 1] .= sample_x_0()
+        x_pf[:, 1, n] .= sample_x_0()
     end
 
     # Particle filter.
@@ -41,11 +41,11 @@ function particle_filter(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<
             a[t, :] .= sample(1:N, Weights(w[t-1, :]), N)
 
             # Propagate resampled particles.
-            x_pf[:, :, t] .= f(x_pf[:, a[t, :], t-1], repeat(u[:, t-1], 1, N)) + sample_v(N)
+            x_pf[:, t, :] .= f(x_pf[:, t-1, a[t, :]], repeat(u[:, t-1], 1, N)) + sample_v(N)
         end
 
         # PF weight update based on measurement model (logarithms are used for numerical reasons).
-        log_w .= log_pdf_w(y[:, t] .- g(x_pf[:, :, t], repeat(u[:, t], 1, N)))
+        log_w .= log_pdf_w(y[:, t] .- g(x_pf[:, t, :], repeat(u[:, t], 1, N)))
         max_log_w = maximum(log_w)
         w[[t], :] .= exp.(log_w .- max_log_w)
         sum_w = sum(w[t, :])
@@ -206,10 +206,10 @@ function particle_MMH(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:Ab
             # Use sample if the burn-in period is reached and the sample is not removed by thinning.
             if (K_b < accepted_samples) && (mod(accepted_samples - (K_b + 1), k_d + 1) == 0)
                 PMMH_samples[current_sample].theta .= theta_prop
-                PMMH_samples[current_sample].x_m1 .= x_pf[:, :, end]
+                PMMH_samples[current_sample].x_m1 .= x_pf[:, end, :]
                 PMMH_samples[current_sample].w_m1 .= w[end, :]
                 PMMH_samples[current_sample].u_m1 .= u[:, end]
-                PMMH_samples[current_sample].x_0 .= x_pf[:, :, 1]
+                PMMH_samples[current_sample].x_0 .= x_pf[:, 1, :]
                 PMMH_samples[current_sample].w_0 .= w[1, :]
                 current_sample += 1
             end
@@ -519,7 +519,7 @@ function particle_MMH_blocked(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMat
             # Use sample if the burn-in period is reached and the sample is not removed by thinning.
             if (K_b < accepted_samples) && (mod(accepted_samples - (K_b + 1), k_d + 1) == 0)
                 PMMH_samples[current_sample].theta .= theta_prop
-                PMMH_samples[current_sample].x_m1 .= x_pf[:, :, end]
+                PMMH_samples[current_sample].x_m1 .= x_pf[:, end, :]
                 PMMH_samples[current_sample].w_m1 .= w[end, :]
                 PMMH_samples[current_sample].u_m1 .= u[:, end]
                 PMMH_samples[current_sample].x_0 .= x_0
