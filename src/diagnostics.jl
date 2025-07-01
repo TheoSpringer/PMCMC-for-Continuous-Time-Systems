@@ -1,4 +1,107 @@
 """
+    compute_ess(PMMH_samples::Vector{PMMH_sample}; max_lag::Int=100)
+
+Compute the effective sample size (ESS) for each parameter and state.
+
+# Arguments
+- `PMMH_samples`: PMMH samples
+- `max_lag`: maximum lag for autocorrelation estimation.
+
+# Returns
+- `ess`: vector of ESS estimates for all variables.
+"""
+function compute_ess(PMMH_samples::Vector{PMMH_sample}; max_lag::Int=100)
+    # Get number of models.
+    K = size(PMMH_samples, 1)
+
+    # Get number of parameters of the PMMH samples.
+    n_variables = length(PMMH_samples[1].theta) + size(PMMH_samples[1].x_m1, 1)
+
+    # Fill matrix with the series of the parameters of the PMMH samples.
+    sample_matrix = Array{Float64}(undef, K, n_variables)
+    for i in 1:K
+        # Sample initial state.
+        star = sample(1:length(PMMH_samples[i].w_m1), Weights(PMMH_samples[i].w_m1))
+        x_m1 = PMMH_samples[i].x_m1[:, star]
+        sample_matrix[i, :] .= [PMMH_samples[i].theta; vec(x_m1)]
+    end
+
+    # Calculate the autocorrelation.
+    autocorrelation = autocor(sample_matrix, Array(0:max_lag); demean=true)
+    ess = zeros(n_variables)
+
+    for i in 1:n_variables
+        # Sum autocorrelation of i-th variable until first negative or max_lag.
+        autocorrelation_sum = 0.0
+        for lag in 1:max_lag
+            if autocorrelation[lag+1, i] < 0
+                break
+            end
+            autocorrelation_sum += autocorrelation[lag+1, i]
+        end
+
+        # Compute the effective sample size.
+        ess[i] = K / (1 + 2 * autocorrelation_sum)
+    end
+
+    return ess
+end
+
+"""
+    compute_gelman_rubin(PMMH_chains::Vector{Vector{PMMH_sample}})
+
+Compute the Gelman–Rubin statistic for each parameter and latent state from a vector of PMMH chains.
+
+# Arguments
+- `PMMH_chains`: vector of chains, where each chain is a vector of PMMH samples
+
+# Returns
+- `R_hat`: vector of R̂ values, one for each variable
+"""
+function compute_gelman_rubin(PMMH_chains::Vector{Vector{PMMH_sample}})
+    M = length(PMMH_chains) # Number of chains
+    K = length(PMMH_chains[1]) # Number of samples per chain
+
+    # Get number of parameters of the PMMH samples.
+    n_variables = length(PMMH_chains[1][1].theta) + size(PMMH_chains[1][1].x_m1, 1)
+
+    # Extract samples from each chain
+    sample_matrices_chains = Array{Float64}[]
+    for chain in PMMH_chains
+        sample_matrix = Array{Float64}(undef, K, n_variables)
+
+        for i in 1:K
+            # Sample state at the last timestep of the training dataset.
+            star = sample(1:length(chain[i].w_m1), Weights(chain[i].w_m1))
+            x_m1 = chain[i].x_m1[:, star]
+            sample_matrix[i, :] .= [chain[i].theta; vec(x_m1)]
+        end
+
+        push!(sample_matrices_chains, sample_matrix)
+    end
+
+    # Compute means and variances
+    means = zeros(M, n_variables)
+    variances = zeros(M, n_variables)
+    for m in 1:M
+        means[m, :] .= vec(mean(sample_matrices_chains[m], dims=1))
+        variances[m, :] .= vec(var(sample_matrices_chains[m], dims=1, corrected=true))
+    end
+
+    # Between-chain and within-chain variance
+    mean_overall = mean(means, dims=1)
+    B = K / (M - 1) .* sum((means .- mean_overall) .^ 2, dims=1)
+    W = mean(variances, dims=1)
+
+    # Estimated marginal posterior variance and R̂
+    V_hat = (K - 1) / K .* W .+ B / K
+    R_hat = sqrt.(V_hat ./ W)
+
+    # Clip from below at 1.0 for numerical consistency
+    return max.(R_hat, 1.0)
+end
+
+"""
     test_prediction(PMMH_samples::Vector{PMMH_sample}, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, u_test, y_test)
 
 Simulate the PMMH samples forward in time and compare the predictions to the test data.

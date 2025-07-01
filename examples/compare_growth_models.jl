@@ -16,7 +16,7 @@ R = fill(17.5, days)
 PPFD = TOMGRO.radiation2ppfd(R)
 CO2 = fill(400.0, days)
 
-######### TOMGRO Simulation #########
+# TOMGRO Simulation
 parameters_TOMGRO, init_state_TOMGRO = TOMGRO.reset()
 inputs_TOMGRO = [TOMGRO.TOMGRO_input(t, ppfd, co2) for (t, ppfd, co2) in zip(T, PPFD, CO2)]
 
@@ -31,7 +31,7 @@ end
 # Plot TOMGRO results.
 # TOMGRO.plot_history(states_TOMGRO, inputs_TOMGRO)
 
-######### SIMPLE Simulation #########
+# SIMPLE Simulation
 parameters_SIMPLE, init_state_SIMPLE = SIMPLE.reset()
 inputs_SIMPLE = [SIMPLE.SIMPLE_input(t, d, r, co2) for (t, d, r, co2) in zip(T, D, R, CO2)]
 

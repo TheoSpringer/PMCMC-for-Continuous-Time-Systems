@@ -28,6 +28,7 @@ mutable struct PMMH_sample
 end
 
 include("PMMH.jl")
-include("optimal_control.jl")
-include("plotting.jl")
+include("diagnostics.jl")
+include("epsilon.jl")
+include("optimal_control_legacy.jl")
 end

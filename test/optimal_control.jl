@@ -1,3 +1,4 @@
+using Test
 using Revise
 using LinearAlgebra
 using Random
@@ -5,17 +6,10 @@ using Distributions
 using Plots
 using StatsPlots
 using Printf
-using Base.Threads
-using JLD2
 using JuMP
 import HSL_jll
 
 using PMMHopt
-
-include("SIMPLE/SIMPLE.jl")
-include("TOMGRO/TOMGRO.jl")
-using .SIMPLE
-using .TOMGRO
 
 # Specify seed (for reproducible results).
 Random.seed!(1)
@@ -24,7 +18,7 @@ Random.seed!(1)
 sampling_timer = time()
 
 # Learning parameters.
-K = Int(1e4) # number of PMMH samples in final stage
+K = Int(1e1) # Int(1e4) # number of PMMH samples in final stage
 k_d = 0 # number of samples to be skipped to decrease correlation (thinning)
 K_b = 200 # length of burn-in period for each stage
 N_init = 200 # initial number of particles of the particle filter - will be adjusted later
@@ -130,71 +124,90 @@ u_test = u[:, T_train+1:end]
 x_test = x[:, T_train+1:end]
 y_test = y[:, T_train+1:end]
 
-# Plot data.
-plot()
-for i in 1:n_u
-    plot!(1:T_total, u[i, :], label="u_$i", lw=2, legend=:topright)
-end
-for i in 1:n_y
-    plot!(1:T_total, y[i, :], label="y_$i", lw=2)
-end
-xlabel!("t")
-ylabel!("u | y")
-
 # Run a staged PMMH sampler.
 # Aim for an acceptance ratio of around 20–30% for a random-walk proposal.
 PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
+# @load "PMMH_samples.jld2" PMMH_samples
 
-# In case the parameters theta and the initial state are highly correlated, e.g., due to small process noise, it may be beneficial to use a blocked PMMH sampler.
-#=
-proposal_cov_init = Diagonal(vcat(theta_var, x_0_var)) # initial proposal covariance for theta and x_0
-PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH_blocked(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_v_theta, log_pdf_w_theta, log_pdf_theta, log_pdf_x_0, theta_init, x_0_init, proposal_cov_init, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
-=#
+# Formulate the optimal control problem (OCP) using the PMMH samples.
 
-# Simulate the posterior models forward and compare to test data.
-# The predicted trajectories should track the true outputs well.
-PMMHopt.test_prediction(PMMH_samples, n_x, f_theta, g_theta, sample_v_theta, sample_w_theta, 1, u_test, y_test)
+# Revenue from selling the crops.
+# The price for the crop is set well above current prices as vertical farming is not yet economically competitive.
+price_crop = 10000 # selling price of crop in €/kg
+HI = 0.68 # harvest index (proportion of total biomass that is harvestable)
+revenue(mB) = price_crop * HI * mB # revenue as a function of biomass in €/m²
 
-# Plot the autocorrelation function (ACF) of the samples.
-# A well-mixed chain will show fast decay of autocorrelation. After thinning, the ACF should be near zero even at small lags.
-PMMHopt.plot_autocorrelation(PMMH_samples; max_lag=200)
+# Costs: heating, cooling, radiation, and irrigation.
+price_kwh = 0.14 # price per kWh in €
+price_MJ = (1 / 3.6) * price_kwh # price per MJ in €
 
-# Compute the effective sample size (ESS).
-# The ESS indicates how many effectively independent samples were drawn. Ideally, after thinning, ESS should approach K.
-# The goal of tuning is to maximize the ESS per second.
-ess = PMMHopt.compute_ess(PMMH_samples; max_lag=200)
-@printf("Minimum ESS: %.1f (= %.2f / s)\n", minimum(ess), minimum(ess) / time_sampling)
+heat_capacity_air = 1.2e-3  # volumetric heat capacity of air in MJ/m³/K
+theta_ambient = 10.0  # ambient temperature in °C
+theta_max = 35.0  # maximum temperature in °C
+c_theta = heat_capacity_air .* price_MJ ./ (theta_max .- theta_ambient) # coefficient for heating/cooling cost
+cost_heating(theta) = c_theta .* (theta .- theta_ambient) # heating cost as a function of air temperature in €/m²
 
-# Plot the parameter and latent state trace.
-# The trace should appear stationary and show no long-term trends after burn-in. Jump sizes should look reasonable.
-PMMHopt.plot_parameter_trace(PMMH_samples)
+cost_radiation(R) = price_MJ * R # cost of radiation as a function of radiation in €/m²
 
-# Plot the posterior histogram with overlaid priors and true values (if known).
-# If the data is informative, the posterior should be tighter than the prior and centered near the true value.
-prior_pdf = Vector{Tuple{Vector{Float64},Vector{Float64}}}()
-for i in 1:length(theta_mean)
-    prior = Normal(theta_mean[i], sqrt(theta_var[i]))
-    values = range(quantile(prior, 0.01), stop=quantile(prior, 0.99), length=500)
-    push!(prior_pdf, (values, pdf(prior, values)))
+c_d = 0.02 # cost coefficient for irrigation cost
+cost_irrigation(D) = c_d .* (D .- 1) .^ 2 # cost of irrigation as a function of the relative level of drought in €/m²
+
+# Objective: maximize profit.
+profit(u, x, y) = revenue(x[1, end]) .- sum(cost_heating(u[1, :]) .- cost_radiation(u[3, :]) .- cost_irrigation(u[2, :])) # profit in €/m²
+J(u, x, y) = -profit(u, x, y) # cost function to be minimized (negative profit)
+
+# Scenario dependent constraints for u, x, and y.
+h_scenario(u, x, y) = 0.0
+
+# Scenario independent constraints for the inputs u.
+h_u(u) = [
+    u[1, :] .- 35.0; # maximum temperature
+    0.0 .- u[1, :]; # minimum temperature
+    u[2, :] .- 1.0; # maximum drought index
+    0.0 .- u[2, :]; # minimum drought index
+    u[3, :] .- 35.0; # maximum radiation
+    0.0 .- u[3, :] # minimum radiation
+]
+
+# Parameters for the OCP.
+H = 30 # time horizon in days
+K_pre_solve = 10 # number of samples used to pre-solve the OCP to get a good initial guess
+
+# Ipopt options
+Ipopt_options = Dict("max_iter" => 100000, "tol" => 1e-6, "hsllib" => HSL_jll.libhsl_path, "linear_solver" => "ma57", "print_timing_statistics" => "yes") # "hessian_approximation" => "limited-memory", "nlp_scaling_method" => "gradient-based", "mu_strategy" => "adaptive"
+
+# Start optimization.
+# u_opt, x_opt, y_opt, J_opt = PMMHopt.solve_PMMH_OCP(PMMH_samples, n_y, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; K_pre_solve=K_pre_solve, solver_opts=Ipopt_options)[1:4]
+U_init = zeros(n_u, H) # initial guess for the input trajectory
+U_opt, X_opt, Y_opt, J_opt = PMMHopt.solve_PMMH_OCP(PMMH_samples, n_y, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; U_init=U_init, solver_opts=Ipopt_options)[1:4]
+
+# Helper function to simulate the system forward using different input trajectories and noise realizations.
+function simulate_system(f, g, x_t, u, V, W)
+    H = size(u, 2)
+    n_x = length(x_t)
+    n_y = size(W, 1)
+
+    x = Array{Float64}(undef, n_x, H)
+    y = Array{Float64}(undef, n_y, H)
+
+    x[:, 1] = x_t
+
+    for t = 2:H
+        x[:, t] = f(x[:, t-1], u[:, t-1]) + V[:, t-1]
+    end
+    for t = 1:H
+        y[:, t] = g(x[:, t], u[:, t]) + W[:, t]
+    end
+    return x, y
 end
-for i in 1:length(x_0_mean)
-    prior = Normal(x_0_mean[i], sqrt(x_0_var[i]))
-    values = range(quantile(prior, 0.01), stop=quantile(prior, 0.99), length=500)
-    push!(prior_pdf, (values, pdf(prior, values)))
-end
-PMMHopt.plot_parameter_pdf(PMMH_samples; bins=50, prior_pdf=prior_pdf, true_values=[theta_true; x_training[:, 1]])
 
-# Optional: run multiple independent PMMH chains and compute the Gelman–Rubin statistic.
-# R̂ quantifies convergence by comparing within-chain to between-chain variance.
-# R̂ close to 1 (typically R̂ < 1.05) indicates good convergence across chains.
-#=
-M = 10 # number of independent chains
-PMMH_chains = Vector{Vector{PMMH_sample}}(undef, M)
-@threads for m in 1:M
-    theta_init = rand(MvNormal(theta_mean, Diagonal(theta_var)))
-    PMMH_chains[m] = PMMHopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer)[1]
-end
+# Generate noise realizations for the simulations.
+V = sample_v_theta(theta_true, H)
+W = sample_w_theta(theta_true, H)
 
-R_hat = PMMHopt.compute_gelman_rubin(PMMH_chains)
-@printf("Maximum R̂: %.2f\n", maximum(R_hat))
-=#
+# Simulate the system forward using the optimized input trajectory.
+x_true_opt, y_true_opt = simulate_system(f_true, g_true, x_test[:, 1], U_opt, V, W)
+profit_opt = profit(U_opt, x_true_opt, y_true_opt)
+
+# Plot predictions.
+plot_predictions(Y_opt, y_true_opt)
