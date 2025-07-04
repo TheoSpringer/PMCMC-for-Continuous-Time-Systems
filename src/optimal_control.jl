@@ -12,7 +12,8 @@ subject to:
 x_t^{[k]} &= f_{\\theta^{[k]}}(x_{t-1}^{[k]}, u_{t-1}) + v_{t-1}^{[k]}, \\\\
 y_t^{[k]} &= g_{\\theta^{[k]}}(x_t^{[k]}, u_t) + w_t^{[k]}, \\\\
 J_H^{[k]} &= J_H(u_{0:H}, x_{0:H}^{[k]}, y_{0:H}^{[k]}) \\leq \\overline{J_H}, \\\\
-h(&u_{0:H},x_{0:H}^{[k]},y_{0:H}^{[k]}) \\leq 0.
+h_{\\mathrm{scenario}}(&u_{0:H},x_{0:H}^{[k]},y_{0:H}^{[k]}) \\leq 0. \\\\
+h_{u}(&u_{0:H}) \\leq 0.
 \\end{aligned}
 ```
 
@@ -56,12 +57,12 @@ function solve_PMMH_OCP(PMMH_samples::Vector{PMMH_sample}, f_theta::Function, g_
 
     # Sample initial states if not provided.
     if X_t === nothing
-        X_t = Array{Float64}(undef, n_x * K)
+        X_t = Array{Float64}(undef, n_x, K)
         for k in 1:K
             # Sample state and propagate.
             star = sample(1:length(PMMH_samples[k].w_m1), Weights(PMMH_samples[k].w_m1))
             x_m1 = PMMH_samples[k].x_m1[:, star]
-            X_t[(k-1)*n_x+1:n_x*k] .= f_theta(PMMH_samples[k].theta, x_m1, PMMH_samples[k].u_m1) .+ sample_v_theta(PMMH_samples[k].theta, 1)
+            X_t[:, k] .= f_theta(PMMH_samples[k].theta, x_m1, PMMH_samples[k].u_m1) .+ sample_v_theta(PMMH_samples[k].theta, 1)
         end
     end
 
@@ -120,124 +121,97 @@ function solve_PMMH_OCP(PMMH_samples::Vector{PMMH_sample}, f_theta::Function, g_
     end
 
     # Determine initial guess for X and Y.
-    X_init = Array{Float64}(undef, n_x * K, H) # initial guess for X
-    X_init[:, 1] .= X_t
-    Y_init = Array{Float64}(undef, n_y * K, H) # initial guess for Y
+    X_init = Array{Float64}(undef, n_x, H, K) # initial guess for X
+    Y_init = Array{Float64}(undef, n_y, H, K) # initial guess for Y
     for k in 1:K
         # Get current model.
         f(x, u) = f_theta(PMMH_samples[k].theta, x, u)
         g(x, u) = g_theta(PMMH_samples[k].theta, x, u)
+
+        X_init[:, 1, k] .= X_t[:, k]
         for t in 2:H
-            X_init[n_x*(k-1)+1:n_x*k, t] = f(X_init[n_x*(k-1)+1:n_x*k, t-1], U_init[:, t-1]) + V[:, t-1, k]
+            X_init[:, t, k] = f(X_init[:, t-1, k], U_init[:, t-1]) + V[:, t-1, k]
         end
         for t in 1:H
-            Y_init[n_y*(k-1)+1:n_y*k, t] = g(X_init[n_x*(k-1)+1:n_x*k, t], U_init[:, t]) + W[:, t, k]
+            Y_init[:, t, k] = g(X_init[:, t, k], U_init[:, t]) + W[:, t, k]
         end
     end
 
-    # Set up OCP.
-    OCP = Model(Ipopt.Optimizer)
-    @variable(OCP, U[i=1:n_u, j=1:H], start = U_init[i, j])
-    @variable(OCP, X[i=1:n_x*K, j=1:H], start = X_init[i, j])
-    @variable(OCP, Y[i=1:n_y*K, j=1:H], start = Y_init[i, j])
+    # Create evaluator.
+    evaluator = PMMH_OCP_Evaluator(PMMH_samples, V, W, X_t, f_theta, g_theta, J, J_u, h_scenario, h_u, n_u, n_x, n_y, H)
 
-    # Set the initial state.
-    for i in 1:n_x*K
-        fix(X[i, 1], X_t[i]; force=true)
+    # Get the bounds for z.
+    z_sets = evaluator.z_sets
+
+    # Get the bounds for the constraint vector h(z).
+    h_bounds = evaluator.h_bounds
+
+    # Create model.
+    model = MOI.Utilities.UniversalFallback(MOI.Utilities.Model{Float64}())
+
+    # Add decision variables and bounds.
+    z_indices = Vector{MOI.VariableIndex}(undef, evaluator.n_z)
+
+    for i in eachindex(z_sets)
+        z_indices[i] = MOI.add_variable(model)
+        MOI.add_constraint(model, z_indices[i], z_sets[i])
     end
+
+    # Set initial state for the decision vector.
+    if J_u
+        z_init = pack_z(U_init, X_init, Y_init, evaluator)
+    else
+        z_init = pack_z(U_init, X_init, Y_init, evaluator; J_max=0.0)
+    end
+    MOI.set.(Ref(model), Ref(MOI.VariablePrimalStart()), z_indices, z_init)
+
+    # Add constraints.
+    block = MOI.NLPBlockData(h_bounds, evaluator, true)
+    MOI.set(model, MOI.NLPBlock(), block)
+
+    # Goal: Minimize the objective.
+    MOI.set(model, MOI.ObjectiveSense(), MOI.MIN_SENSE)
+
+    # Create optimizer.
+    optimizer = Ipopt.Optimizer()
 
     # Set options.
     if !(solver_opts === nothing)
-        for opt in solver_opts
-            set_attributes(OCP, opt)
+        for (opt, val) in solver_opts
+            MOI.set(optimizer, MOI.RawOptimizerAttribute(opt), val)
         end
     end
 
     if !print_progress
-        set_silent(OCP)
+        MOI.set(model, MOI.Silent(), true)
     end
-
-    # Define objective
-    if J_u
-        # Cost function depends only on u, i.e., J_max = J
-        @objective(OCP, Min, J(U))
-    else
-        # Epigraph notation of the cost function.
-        J_max = @variable(OCP, J_max)
-        @objective(OCP, Min, J_max)
-        for k in 1:K
-            @constraint(OCP, J(U, X[n_x*(k-1)+1:n_x*k, :], Y[n_y*(k-1)+1:n_y*k, :]) <= J_max)
-        end
-    end
-
-    # Add dynamic and additional constraints for all scenarios.
-    for k in 1:K
-        # Get current model.
-        f(x, u) = f_theta(PMMH_samples[k].theta, x, u)
-        g(x, u) = g_theta(PMMH_samples[k].theta, x, u)
-
-        # Add dynamic constraints
-        for t in 2:H
-            @constraint(OCP, X[n_x*(k-1)+1:n_x*k, t] .== f(X[n_x*(k-1)+1:n_x*k, t-1], U[:, t-1]) + V[:, t-1, k])
-        end
-        for t in 1:H
-            @constraint(OCP, Y[n_y*(k-1)+1:n_y*k, t] .== g(X[n_x*(k-1)+1:n_x*k, t], U[:, t]) + W[:, t, k])
-        end
-
-        # Add scenario constraints.
-        @constraint(OCP, h_scenario(U, X[n_x*(k-1)+1:n_x*k, :], Y[n_y*(k-1)+1:n_y*k, :]) .<= 0)
-    end
-
-    # Add constraints for the input.
-    @constraint(OCP, h_u(U) .<= 0)
-
-    #=
-    # Add callback that stores barrier parameter mu.
-    barrier_param_mu = Float64[]
-
-    function get_mu(
-        alg_mod::Cint,
-        iter_count::Cint,
-        obj_value::Float64,
-        inf_pr::Float64,
-        inf_du::Float64,
-        mu::Float64,
-        d_norm::Float64,
-        regularization_size::Float64,
-        alpha_du::Float64,
-        alpha_pr::Float64,
-        ls_trials::Cint)
-        push!(barrier_param_mu, mu)
-        return true
-    end
-
-    MOI.set(OCP, Ipopt.CallbackFunction(), get_mu)
-    =#
 
     # Solve OCP.
     if print_progress
         println("### Started optimization algorithm")
     end
 
-    optimize!(OCP)
+    MOI.optimize!(optimizer, model)
     time_optimization = time() - optimization_timer
 
     if print_progress
         @printf("### Optimization complete\nRuntime: %.2f s\n", time_optimization)
     end
 
-    U_opt = value.(U)
-    X_opt = reshape(value.(X), n_x, K, H)
-    X_opt = permutedims(X_opt, (1, 3, 2))
-    Y_opt = reshape(value.(Y), n_y, K, H)
-    Y_opt = permutedims(Y_opt, (1, 3, 2))
-    J_opt = objective_value(OCP)
-    solve_successful = is_solved_and_feasible(OCP)
-    iterations = MOI.get(OCP, MOI.BarrierIterations())
-    # mu = barrier_param_mu[end]
+    # status = MOI.get(model, MOI.TerminationStatus())
+    z_opt = MOI.get.(model, MOI.VariablePrimal(), z_indices)
+
+    # Extract the solution.
+    U_opt, X_opt, Y_opt = unpack_z(z_opt, evaluator)[1:3]
+    J_opt = MOI.get(model, MOI.ObjectiveValue())
+    termination_status = MOI.get(model, MOI.TerminationStatus())
+    primal_status = MOI.get(model, MOI.PrimalStatus())
+    solve_successful = (termination_status == MOI.OPTIMAL && primal_status == MOI.FEASIBLE_POINT)
+    iterations = MOI.get(model, MOI.BarrierIterations())
 
     if !solve_successful
-        @warn("The optimization did not converge to an optimal and feasible solution. The solver returned: $(termination_status(OCP))")
+        @warn ("The optimization did not converge to an optimal and feasible solution. " *
+               "Termination status: $term_status, Primal status: $primal_status.")
     end
 
     return U_opt, X_opt, Y_opt, J_opt, solve_successful, iterations
@@ -258,7 +232,8 @@ subject to:
 x_t^{[k]} &= f_{\\theta^{[k]}}(x_{t-1}^{[k]}, u_{t-1}) + v_{t-1}^{[k]}, \\\\
 y_t^{[k]} &= g_{\\theta^{[k]}}(x_t^{[k]}, u_t) + w_t^{[k]}, \\\\
 J_H^{[k]} &= J_H(u_{0:H}, x_{0:H}^{[k]}, y_{0:H}^{[k]}) \\leq \\overline{J_H}, \\\\
-h(&u_{0:H},x_{0:H}^{[k]},y_{0:H}^{[k]}) \\leq 0.
+h_{\\mathrm{scenario}}(&u_{0:H},x_{0:H}^{[k]},y_{0:H}^{[k]}) \\leq 0. \\\\
+h_{u}(&u_{0:H}) \\leq 0.
 \\end{aligned}
 ```
 

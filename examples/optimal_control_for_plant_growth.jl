@@ -167,7 +167,7 @@ profit(u, x, y) = revenue(x[1, end]) .- sum(cost_heating(u[1, :]) .- cost_radiat
 J(u, x, y) = -profit(u, x, y) # cost function to be minimized (negative profit)
 
 # Scenario dependent constraints for u, x, and y.
-h_scenario(u, x, y) = 0.0
+h_scenario(u, x, y) = [0.0]
 
 # Scenario independent constraints for the inputs u.
 h_u(u) = [
@@ -184,7 +184,7 @@ H = 30 # time horizon in days
 K_warmup = ceil(Int, K_pre_solve / 4) # number of samples used to warmup the initialization process of the OCP to get a good initial guess fast
 
 # Ipopt options
-Ipopt_options = Dict("max_iter" => 100000, "tol" => 1e-6, "acceptable_tol" => 1e-4, "hsllib" => HSL_jll.libhsl_path, "linear_solver" => "ma57", "hessian_approximation" => "exact", "print_level" => 5, "derivative_test" => "second-order", "derivative_test_tol" => 1e-5) # "hessian_approximation" => "limited-memory", "nlp_scaling_method" => "gradient-based", "mu_strategy" => "adaptive"
+Ipopt_options = Dict("max_iter" => 100000, "tol" => 1e-6, "acceptable_tol" => 1e-4, "hsllib" => HSL_jll.libhsl_path, "linear_solver" => "ma57", "hessian_approximation" => "exact", "print_level" => 5, "derivative_test" => "first-order", "derivative_test_tol" => 1e-5) # "hessian_approximation" => "limited-memory", "nlp_scaling_method" => "gradient-based", "mu_strategy" => "adaptive"
 
 # Start optimization.
 U_init = zeros(n_u, H) # initial guess for the input trajectory
@@ -212,8 +212,8 @@ function simulate_system(f, g, x_t, u, V, W)
 end
 
 # Generate noise realizations for the simulations.
-V = sample_v_theta(theta_true, H)
-W = sample_w_theta(theta_true, H)
+V = reshape(sample_v_theta(theta_true, H), n_x, H, 1)
+W = reshape(sample_w_theta(theta_true, H), n_y, H, 1)
 
 # Simulate the system forward using the optimized input trajectory.
 # x_true_opt, y_true_opt = simulate_system(f_true, g_true, x_test[:, 1], U_opt, V, W)
@@ -229,7 +229,7 @@ profit_init = profit(U_init, x_true_init, y_true_init)
 # Determine optimal profit (assuming perfect knowledge of the system and noise realizations).
 PMMH_true_system = [PMMH_sample(theta_true, x_training[:, end], [1.0], u_training[:, end], x_0_true, [1.0])]
 
-U_known_system, X_known_system, Y_known_system, J_known_system = PMMHopt.solve_PMMH_OCP(PMMH_true_system, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; X_t=x_test[:, 1], V=V, W=W, U_init=U_init, solver_opts=Ipopt_options)[1:4]
+U_known_system, X_known_system, Y_known_system, J_known_system = PMMHopt.solve_PMMH_OCP(PMMH_true_system, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; X_t=x_test[:, [1]], V=V, W=W, U_init=U_init, solver_opts=Ipopt_options)[1:4]
 
 x_true_known_system, y_true_known_system = simulate_system(f_true, g_true, x_test[:, 1], U_known_system, V, W)
 profit_known_system = profit(U_known_system, x_true_known_system, y_true_known_system)

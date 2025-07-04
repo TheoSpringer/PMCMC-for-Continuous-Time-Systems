@@ -30,5 +30,6 @@ end
 include("PMMH.jl")
 include("diagnostics.jl")
 include("epsilon.jl")
-include("optimal_control_legacy.jl")
+include("NLP_evaluator.jl")
+include("optimal_control.jl")
 end

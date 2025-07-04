@@ -15,7 +15,7 @@ const MOI = MathOptInterface
 
 # This function returns the index ranges for the control inputs, the states of scenarios 1:K, the outputs of scenarios 1:K, and the maximum cost J_max inside the flat decision vector z.
 # Decision vector layout: z = [vec(U); vec(X^[1]) … vec(X^[K]); vec(Y^[1]) … vec(Y^[K]); J_max (optional)]
-function get_z_indices(n_u, n_x, n_y, H, K, J_u)
+function z_indices(n_u::Int, n_x::Int, n_y::Int, H::Int, K::Int, J_u::Bool)
     # Inputs
     indices_U = 1:(n_u*H)
 
@@ -40,7 +40,88 @@ function get_z_indices(n_u, n_x, n_y, H, K, J_u)
     else
         index_J_max = first_Y+K*n_y*H:first_Y+K*n_y*H
     end
+
     return indices_U, indices_X, indices_Y, index_J_max
+end
+
+# This function returns the flat decision vector z from the inputs U, states X, outputs Y, and (optionally) J_max.
+function pack_z(U::AbstractMatrix, X::AbstractArray, Y::AbstractArray, indices_U::UnitRange{Int}, indices_X::Vector{UnitRange{Int}}, indices_Y::Vector{UnitRange{Int}}, index_J_max::UnitRange{Int}, K::Int, n_z::Int, J_u::Bool; J_max::Union{Nothing,AbstractFloat}=nothing)
+    z = Vector{eltype(U)}(undef, n_z)
+    z[indices_U] .= vec(U)
+    for k in 1:K
+        z[indices_X[k]] .= vec(X[:, :, k])
+        z[indices_Y[k]] .= vec(Y[:, :, k])
+    end
+    if !J_u
+        if J_max === nothing
+            z[index_J_max] .= NaN
+        else
+            z[index_J_max] .= J_max
+        end
+    end
+    return z
+end
+
+# This function returns the inputs U, states X, outputs Y, and (optionally) J_max from the flat decision vector z.
+function unpack_z(z::AbstractVector, indices_U::UnitRange{Int}, indices_X::Vector{UnitRange{Int}}, indices_Y::Vector{UnitRange{Int}}, index_J_max::UnitRange{Int}, K::Int, n_u::Int, n_x::Int, n_y::Int, H::Int, J_u::Bool)
+    U = reshape((z[indices_U]), n_u, H)
+    X = Array{eltype(z)}(undef, n_x, H, K)
+    Y = Array{eltype(z)}(undef, n_y, H, K)
+    for k in 1:K
+        X[:, :, k] .= reshape((z[indices_X[k]]), n_x, H)
+        Y[:, :, k] .= reshape((z[indices_Y[k]]), n_y, H)
+    end
+    if !J_u
+        J_max = z[index_J_max]
+        return U, X, Y, J_max
+    else
+        return U, X, Y
+    end
+end
+
+# This function returns the inputs U, states X_k, outputs Y_k, and (optionally) J_max for scenario k from the flat decision vector z.
+function unpack_z_k(z::AbstractVector, k::Int, indices_U::UnitRange{Int}, indices_X::Vector{UnitRange{Int}}, indices_Y::Vector{UnitRange{Int}}, index_J_max::UnitRange{Int}, n_u::Int, n_x::Int, n_y::Int, H::Int, J_u::Bool)
+    U = @views reshape(z[indices_U], n_u, H)
+    X_k = @views reshape(z[indices_X[k]], n_x, H)
+    Y_k = @views reshape(z[indices_Y[k]], n_y, H)
+    if !J_u
+        J_max = z[index_J_max]
+        return U, X_k, Y_k, J_max
+    else
+        return U, X_k, Y_k
+    end
+end
+
+# Returns the decision vector z_scenario that contains the inputs U, states X_k, outputs Y_k, and (optionally) J_max for scenario k from the flat decision vector z containing all decision variables.
+function view_z_scenario(z::AbstractVector, k::Int, indices_U::UnitRange{Int}, indices_X::Vector{UnitRange{Int}}, indices_Y::Vector{UnitRange{Int}}, index_J_max::UnitRange{Int}, J_u::Bool)
+    U_vec = @views z[indices_U]
+    X_k_vec = @views z[indices_X[k]]
+    Y_k_vec = @views z[indices_Y[k]]
+    if !J_u
+        J_max = @views z[index_J_max]
+        z_scenario = [U_vec; X_k_vec; Y_k_vec; J_max]
+    else
+        z_scenario = [U_vec; X_k_vec; Y_k_vec]
+    end
+    return z_scenario
+end
+
+# This function unpacks the inputs U, states X_k, outputs Y_k, and (optionally) J_max from the flat decision vector z_scenario that contains the decision variables for a single scenario.
+function unpack_z_scenario(z_scenario::AbstractVector, n_u::Int, n_x::Int, n_y::Int, H::Int, J_u::Bool)
+    U = @views reshape(z_scenario[1:n_u*H], n_u, H)
+    X_k = @views reshape(z_scenario[n_u*H+1:n_u*H+n_x*H], n_x, H)
+    Y_k = @views reshape(z_scenario[n_u*H+n_x*H+1:n_u*H+n_x*H+n_y*H], n_y, H)
+    if !J_u
+        J_max = @views z_scenario[n_u*H+n_x*H+n_y*H+1]
+        return U, X_k, Y_k, J_max
+    else
+        return U, X_k, Y_k
+    end
+end
+
+# Returns the control inputs U_vec from the flat decision vector z containing all decision variables.
+function view_U_vec(z::AbstractVector, indices_U::UnitRange{Int})
+    return @views z[indices_U]
 end
 
 # This function returns the index ranges for dynamic constraints, the scenario constraints h_scenario, and the input constraints h_u inside the flat constraint vector h(z).
@@ -62,7 +143,7 @@ end
 #           ...;
 #           J^[k=K](U, X^[k=K], Y_1^[k=K]) - J_max (optional)] 
 #
-function get_h_indices(n_x, n_y, H, K, n_h_scenario, n_h_u, J_u)
+function h_indices(n_x::Int, n_y::Int, H::Int, K::Int, n_h_scenario::Int, n_h_u::Int, J_u::Bool)
     # Indices for the dynamic constraints for the states (e.g., f^[k=1](x_1^[k=1],u_1) + w_1^[k=1] - x_2^[k=1] == 0)
     indices_h_dynamics_x = Vector{UnitRange{Int}}(undef, K)
     first_dynamic_constraint_x = 1
@@ -75,6 +156,7 @@ function get_h_indices(n_x, n_y, H, K, n_h_scenario, n_h_u, J_u)
     first_dynamic_constraint_y = first_dynamic_constraint_x + K * n_x * (H - 1)
     for k in 1:K
         indices_h_dynamics_y[k] = first_dynamic_constraint_y+(k-1)*n_y*H:first_dynamic_constraint_y+k*n_y*H-1
+
     end
 
     # Indices for the scenario constraints (e.g., h_scenario^[k=1](U, X^[k=1], Y_1^[k=1]) <= 0)
@@ -89,12 +171,16 @@ function get_h_indices(n_x, n_y, H, K, n_h_scenario, n_h_u, J_u)
     indices_h_u = first_h_u:first_h_u+n_h_u-1
 
     # Indices for the J^[k] - J_max <= 0 constraint (e.g., J(U, X^[k=1], Y_1^[k=1]) - J_max <= 0)
-    if J_u
-        # Pass empty range if J_u is true
-        indices_h_J_max = 1:0 # empty range
-    else
-        first_J_max = first_h_u + n_h_u
-        indices_h_J_max = first_J_max:first_J_max+K-1
+    indices_h_J_max = Vector{UnitRange{Int}}(undef, K)
+    current_h_J_max = first_h_u + n_h_u
+    for k in 1:K
+        if J_u
+            # Pass empty range if J_u is true
+            indices_h_J_max[k] = 1:0 # empty range
+        else
+            indices_h_J_max[k] = current_h_J_max:current_h_J_max
+        end
+        current_h_J_max += 1
     end
     return indices_h_dynamics_x, indices_h_dynamics_y, indices_h_scenario, indices_h_u, indices_h_J_max
 end
@@ -107,20 +193,22 @@ struct PMMH_OCP_Evaluator <: MOI.AbstractNLPEvaluator
     n_u::Int
     n_x::Int
     n_y::Int
+    n_z::Int # total number of decision add_variables
+    n_h::Int # total number of constraints
 
     # Data
     PMMH_samples::Vector{PMMH_sample}
     V::Array{Float64,3}
     W::Array{Float64,3}
+    X_t::Array{Float64,2} # initial states for the scenarios
 
     # Functions
-    # The functions f_theta and g_theta contain the dynamic constraints for a single scenario over the whole horizon H.
-    h_dynamics_x!::Function
-    h_dynamics_y!::Function
-    h_scenario!::Function
-    h_u!::Function
-    h_J_max!::Function
-    eval_J_u::Function
+    h_dynamics_x!::Function # dynamics constraints for the states
+    h_dynamics_y!::Function # dynamics constraints for the outputs
+    h_scenario!::Function # scenario constraints
+    h_u!::Function # input constraints
+    h_J_max!::Function # J - J_max constraint (optional)
+    eval_J_u::Function # evaluates J(u)
     J_u::Bool
 
     # Index ranges 
@@ -134,7 +222,13 @@ struct PMMH_OCP_Evaluator <: MOI.AbstractNLPEvaluator
     indices_h_dynamics_y::Vector{UnitRange{Int}}
     indices_h_scenario::Vector{UnitRange{Int}}
     indices_h_u::UnitRange{Int}
-    indices_h_J_max::UnitRange{Int}
+    indices_h_J_max::Vector{UnitRange{Int}}
+
+    # Bounds for the decision vector z
+    z_sets::Vector{MOI.AbstractScalarSet}
+
+    # Bounds for the constraint vector h(z)
+    h_bounds::Vector{MOI.NLPBoundsPair}
 
     # Global sparsity pattern
     Jac_pattern_h::Vector{Tuple{Int,Int}}
@@ -160,12 +254,12 @@ struct PMMH_OCP_Evaluator <: MOI.AbstractNLPEvaluator
 
     # Local sparsity pattern for the J - J_max (epigraph) constraint
     Jac_pattern_h_J_max::SparseMatrixCSC{Bool,Int}
-    colors_J_max::Vector{Int}
+    colors_h_J_max::Vector{Int}
     nzrange_h_J_max::Vector{UnitRange{Int}}
 end
 
 # Constructor for PMMH_OCP_Evaluator. The sparsity pattern is built once for a single scenario and then replicated for all K scenarios.
-function PMMH_OCP_Evaluator(PMMH_samples, V, W, f_theta, g_theta, J, J_u, h_scenario, h_u, n_u, n_x, n_y, H)
+function PMMH_OCP_Evaluator(PMMH_samples::Vector{PMMH_sample}, V::Array{Float64}, W::Array{Float64}, X_t::Array{Float64}, f_theta::Function, g_theta::Function, J::Function, J_u::Bool, h_scenario::Function, h_u::Function, n_u::Int, n_x::Int, n_y::Int, H::Int)
     # Check if multithreading is enabled.
     n_threads = Threads.nthreads()
 
@@ -177,19 +271,100 @@ function PMMH_OCP_Evaluator(PMMH_samples, V, W, f_theta, g_theta, J, J_u, h_scen
               "Enable multithreading for better performance."
     end
 
-    # Get number of scenarios and the index ranges in the flat decision vector z corresponding to the inputs, states, outputs, and J_max.
+    # Get the number of decision variables.
     K = length(PMMH_samples)
-    indices_U, indices_X, indices_Y, index_J_max = get_z_indices(n_u, n_x, n_y, H, K, J_u)
+    if !J_u
+        n_z = n_u * H + n_x * H + n_y * H + 1
+    else
+        n_z = n_u * H + n_x * H + n_y * H
+    end
 
-    # Get the size of the constraints and the index ranges in the flat constraint vector h(z) corresponding to the dynamic constraints, scenario constraints h_scenario, input constraints h_u, and the J - J_max constraint.
-    n_h_scenario = length(h_scenario(zeros(n_u, H), zeros(n_x, H), zeros(n_y, H))[:])
-    n_h_u = length(h_u(zeros(n_u, H))[:])
-    indices_h_dynamics_x, indices_h_dynamics_y, indices_h_scenario, indices_h_u, indices_h_J_max = get_h_indices(n_x, n_y, H, K, n_h_scenario, n_h_u, J_u)
+    # Get the index ranges in the flat decision vector z corresponding to the inputs, states, outputs, and (optionally) J_max.
+    indices_U, indices_X, indices_Y, index_J_max = z_indices(n_u, n_x, n_y, H, K, J_u)
+
+    # Get bounds for the decision vector z.
+    z_sets = Vector{MOI.AbstractScalarSet}(undef, n_z)
+    for i in indices_U
+        z_sets[i] = MOI.Interval(-Inf, Inf)
+    end
+    for k in 1:K
+        for i in 1:length(indices_X[k])
+            if i <= n_x
+                # Initial state x_1^[k] is fixed.
+                z_sets[indices_X[k][i]] = MOI.EqualTo(X_t[i, k])
+            else
+                z_sets[indices_X[k][i]] = MOI.Interval(-Inf, Inf)
+            end
+        end
+        for i in indices_Y[k]
+            z_sets[i] = MOI.Interval(-Inf, Inf)
+        end
+    end
+    if !J_u
+        for i in index_J_max
+            z_sets[i] = MOI.Interval(-Inf, Inf)
+        end
+    end
+
+    # Get the size of the constraints.
+    h_test = h_scenario(zeros(n_u, H), zeros(n_x, H), zeros(n_y, H))
+    if isa(h_test, AbstractArray)
+        n_h_scenario = length(vec(h_test))
+    else
+        n_h_scenario = 1
+    end
+
+    h_u_test = h_u(zeros(n_u, H))
+    if isa(h_u_test, AbstractArray)
+        n_h_u = length(vec(h_u_test))
+    else
+        n_h_u = 1
+    end
+
+    if !J_u
+        n_h = K * n_x * (H - 1) + K * n_y * H + K * n_h_scenario + n_h_u + K
+    else
+        n_h = K * n_x * (H - 1) + K * n_y * H + K * n_h_scenario + n_h_u
+    end
+
+    # Get the index ranges in the flat constraint vector h(z) corresponding to the dynamic constraints, scenario constraints h_scenario, input constraints h_u, and the J - J_max constraint.
+    indices_h_dynamics_x, indices_h_dynamics_y, indices_h_scenario, indices_h_u, indices_h_J_max = h_indices(n_x, n_y, H, K, n_h_scenario, n_h_u, J_u)
+
+    # Get bounds for the constraint vector h(z).
+    h_bounds = Vector{MOI.NLPBoundsPair}(undef, n_h)
+    for k in 1:K
+        # Dynamic (equality) constraints for the states.
+        for i in indices_h_dynamics_x[k]
+            h_bounds[i] = MOI.NLPBoundsPair(0.0, 0.0)
+        end
+
+        # Dynamic (equality) constraints for the outputs.
+        for i in indices_h_dynamics_y[k]
+            h_bounds[i] = MOI.NLPBoundsPair(0.0, 0.0)
+        end
+
+        # Scenario (inequality) constraints.
+        for i in indices_h_scenario[k]
+            h_bounds[i] = MOI.NLPBoundsPair(-Inf, 0.0)
+        end
+
+        # J - J_max (inequality) constraints.
+        if !J_u
+            for i in indices_h_J_max[k]
+                h_bounds[i] = MOI.NLPBoundsPair(-Inf, 0.0)
+            end
+        end
+    end
+
+    # Input (inequality) constraints.
+    for i in indices_h_u
+        h_bounds[i] = MOI.NLPBoundsPair(-Inf, 0.0)
+    end
 
     # Determine the sparsity pattern for the Jacobian of the dynamics constraints.
     # The following vectors determine in which region the sparsity pattern is evaluated.
     # Without input dependent branches (e.g., min, max, if) the expression tree is fixed and the sparsity pattern does not depend on the actual values of these vectors.
-    z_scenario = zeros(n_u * H + n_x * H + n_y * H)
+    z_scenario = zeros(n_z)
     h_dynamics_x_loc = zeros(n_x * (H - 1))
     h_dynamics_y_loc = zeros(n_y * H)
 
@@ -203,8 +378,7 @@ function PMMH_OCP_Evaluator(PMMH_samples, V, W, f_theta, g_theta, J, J_u, h_scen
 
     # Helper function that returns the constraint vector containing the dynamics constraints over the whole horizon H for one scenario with a vector valued input z = [vec(U); vec(X^[k]); vec(Y^[k])].
     function h_dynamics_x!(h_dyn_x::AbstractVector, z_scenario::AbstractVector, theta::AbstractArray, V_k::AbstractMatrix)
-        U = @views reshape(z_scenario[1:n_u*H], n_u, H)
-        X_k = @views reshape(z_scenario[n_u*H+1:n_u*H+n_x*H], n_x, H)
+        U, X_k = unpack_z_scenario(z_scenario, n_u, n_x, n_y, H, J_u)[1:2]
         return h_dynamics_x!(h_dyn_x, U, X_k, theta, V_k)
     end
 
@@ -217,9 +391,7 @@ function PMMH_OCP_Evaluator(PMMH_samples, V, W, f_theta, g_theta, J, J_u, h_scen
     end
 
     function h_dynamics_y!(h_dyn_y::AbstractVector, z_scenario::AbstractVector, theta::AbstractArray, W_k::AbstractMatrix)
-        U = @views reshape(z_scenario[1:n_u*H], n_u, H)
-        X_k = @views reshape(z_scenario[n_u*H+1:n_u*H+n_x*H], n_x, H)
-        Y_k = @views reshape(z_scenario[n_u*H+n_x*H+1:end], n_y, H)
+        U, X_k, Y_k = unpack_z_scenario(z_scenario, n_u, n_x, n_y, H, J_u)[1:3]
         return h_dynamics_y!(h_dyn_y, U, X_k, Y_k, theta, W_k)
     end
 
@@ -303,19 +475,16 @@ function PMMH_OCP_Evaluator(PMMH_samples, V, W, f_theta, g_theta, J, J_u, h_scen
     # Determine the sparsity pattern for the Jacobian of h_scenario.
     # The following vectors determine in which region the sparsity pattern is evaluated.
     # Without input dependent branches (e.g., min, max, if) the expression tree is fixed and the sparsity pattern does not depend on the actual values of these vectors.
-    z_scenario = zeros(n_u * H + n_x * H + n_y * H)
     h_scenario_loc = zeros(n_h_scenario)
 
     # Helper function that evaluates constraints for a single scenario.
     function h_scenario!(h::AbstractVector, U::AbstractMatrix, X_k::AbstractMatrix, Y_k::AbstractMatrix)
-        h .= h_scenario(U, X_k, Y_k)[:]
+        h .= vec(h_scenario(U, X_k, Y_k))
         return h
     end
 
     function h_scenario!(h::AbstractVector, z_scenario::AbstractVector)
-        U = reshape(@view z_scenario[1:n_u*H], n_u, H)
-        X_k = reshape(@view z_scenario[n_u*H+1:n_u*H+n_x*H], n_x, H)
-        Y_k = reshape(@view z_scenario[n_u*H+n_x*H+1:end], n_y, H)
+        U, X_k, Y_k = unpack_z_scenario(z_scenario, n_u, n_x, n_y, H, J_u)[1:3]
         return h_scenario!(h, U, X_k, Y_k)
     end
 
@@ -373,12 +542,12 @@ function PMMH_OCP_Evaluator(PMMH_samples, V, W, f_theta, g_theta, J, J_u, h_scen
 
     # Helper function that evaluates h_u.
     function h_u!(h::AbstractVector, U::AbstractMatrix)
-        h .= h_u(U)[:]
+        h .= vec(h_u(U))
         return h
     end
 
     function h_u!(h::AbstractVector, U_vec::AbstractVector)
-        U = reshape(@view U_vec, n_u, H)
+        U = @views reshape(U_vec, n_u, H)
         return h_u!(h, U)
     end
 
@@ -403,24 +572,20 @@ function PMMH_OCP_Evaluator(PMMH_samples, V, W, f_theta, g_theta, J, J_u, h_scen
     if !J_u
         # Evaluate the sparsity pattern of the Jacobian of J^[k] - J_max (constraint utilized to minimize the worst-case cost).
         # The following vectors determine in which region the sparsity pattern is evaluated.
-        z_scenario_J = zeros(n_u * H + n_x * H + n_y * H + 1)
-        J_loc = 0.0
+        J_loc = zeros(1)
 
-        function h_J_max!(h::AbstractVector, U::AbstractMatrix, X_k::AbstractMatrix, Y_k::AbstractMatrix, J_max::AbstractFloat)
-            h .= J(U, X_k, Y_k) - J_max
+        function h_J_max!(h::AbstractVector, U::AbstractMatrix, X_k::AbstractMatrix, Y_k::AbstractMatrix, J_max::Union{<:Number,AbstractVector{<:Number}})
+            h .= J(U, X_k, Y_k) .- J_max
             return h
         end
 
         function h_J_max!(h::AbstractVector, z_scenario::AbstractVector)
-            U = reshape(@view z_scenario[1:n_u*H], n_u, H)
-            X_k = reshape(@view z_scenario[n_u*H+1:n_u*H+n_x*H], n_x, H)
-            Y_k = reshape(@view z_scenario[n_u*H+n_x*H+1:end-1], n_y, H)
-            J_max = @view z_scenario[end]
+            U, X_k, Y_k, J_max = unpack_z_scenario(z_scenario, n_u, n_x, n_y, H, J_u)
             return h_J_max!(h, U, X_k, Y_k, J_max)
         end
 
         # Evaluate the sparsity pattern of the Jacobian of h_scenario for a single scenario.
-        Jac_pattern_h_J_max = Symbolics.jacobian_sparsity(h_J_max!, J_loc, z_scenario_J)
+        Jac_pattern_h_J_max = Symbolics.jacobian_sparsity(h_J_max!, J_loc, z_scenario)
 
         # Get matrix coloring.
         colors_h_J_max = SparseDiffTools.matrix_colors(Jac_pattern_h_J_max)
@@ -433,7 +598,7 @@ function PMMH_OCP_Evaluator(PMMH_samples, V, W, f_theta, g_theta, J, J_u, h_scen
 
         # Loop over the scenarios and shift the local sparsity pattern.
         for k in 1:K
-            global_row = indices_h_J_max[k] # first row of h_scenario() of scenario k in the global constraint vector
+            global_row = first(indices_h_J_max[k]) # first row of h_scenario() of scenario k in the global constraint vector
             column_offset_X = first(indices_X[k]) - 1 # first column of the state x_{1:H}^{[k]} of scenario k in the global variable vector
             column_offset_Y = first(indices_Y[k]) - 1 # first column of the output y_{1:H}^{[k]} of scenario k in the global variable vector
             start = length(sparsity_Jacobian_rows) + 1
@@ -472,7 +637,7 @@ function PMMH_OCP_Evaluator(PMMH_samples, V, W, f_theta, g_theta, J, J_u, h_scen
 
         # To compute the gradient of J(U), we need to define a vectorized version of J(U).
         function eval_J_u(U_vec::AbstractVector)
-            U = reshape(@view U_vec, n_u, H)
+            U = @views reshape(U_vec, n_u, H)
             return J(U)
         end
     end
@@ -484,10 +649,12 @@ function PMMH_OCP_Evaluator(PMMH_samples, V, W, f_theta, g_theta, J, J_u, h_scen
     end
 
     return PMMH_OCP_Evaluator(K, H, n_u, n_x, n_y,
-        PMMH_samples, V, W,
+        n_z, n_h,
+        PMMH_samples, V, W, X_t,
         h_dynamics_x!, h_dynamics_y!, h_scenario!, h_u!, h_J_max!, eval_J_u, J_u,
         indices_U, indices_X, indices_Y, index_J_max,
         indices_h_dynamics_x, indices_h_dynamics_y, indices_h_scenario, indices_h_u, indices_h_J_max,
+        z_sets, h_bounds,
         Jac_pattern_h,
         Jac_pattern_h_dynamics_x, colors_h_dynamics_x, nzrange_h_dynamics_x,
         Jac_pattern_h_dynamics_y, colors_h_dynamics_y, nzrange_h_dynamics_y,
@@ -495,6 +662,11 @@ function PMMH_OCP_Evaluator(PMMH_samples, V, W, f_theta, g_theta, J, J_u, h_scen
         Jac_pattern_h_u, colors_h_u, nzrange_h_u,
         Jac_pattern_h_J_max, colors_h_J_max, nzrange_h_J_max)
 end
+
+# Wrappers that allow to pack/unpack z by passing the evaluator.
+pack_z(U::AbstractMatrix, X::AbstractArray, Y::AbstractArray, e::PMMH_OCP_Evaluator; J_max::Union{Nothing,AbstractFloat}=nothing) = pack_z(U, X, Y, e.indices_U, e.indices_X, e.indices_Y, e.index_J_max, e.K, e.n_z, e.J_u; J_max=J_max)
+
+unpack_z(z::AbstractVector, e::PMMH_OCP_Evaluator) = unpack_z(z, e.indices_U, e.indices_X, e.indices_Y, e.index_J_max, e.K, e.n_u, e.n_x, e.n_y, e.H, e.J_u)
 
 # This function returns the features that are available for the PMMH_OCP_Evaluator; see MathOptInterface documentation.
 function MOI.features_available(::PMMH_OCP_Evaluator)
@@ -516,10 +688,10 @@ function MOI.initialize(e::PMMH_OCP_Evaluator, requested::Vector{Symbol})
 end
 
 # The following function evaluates the objective function.
-function MOI.eval_objective(e::PMMH_OCP_Evaluator, z::Vector{Float64})
+function MOI.eval_objective(e::PMMH_OCP_Evaluator, z::AbstractVector)
     if e.J_u
         # J(U) is used as the objective function.
-        U_vec = @views z[e.indices_U]
+        U_vec = view_U_vec(z, e.indices_U)
         return e.eval_J_u(U_vec)
     else
         # Epigraph notation is used.
@@ -528,11 +700,11 @@ function MOI.eval_objective(e::PMMH_OCP_Evaluator, z::Vector{Float64})
 end
 
 # The following function evaluates the gradient of the objective function.
-function MOI.eval_objective_gradient(e::PMMH_OCP_Evaluator, grad::Vector{Float64}, z::Vector{Float64})
+function MOI.eval_objective_gradient(e::PMMH_OCP_Evaluator, grad::AbstractVector, z::AbstractVector)
     fill!(grad, 0.0)
     if e.J_u
         # Gradient of J(U) with respect to U.
-        U_vec = @views z[e.indices_U]
+        U_vec = view_U_vec(z, e.indices_U)
         g_nonzero = @views grad[e.indices_U]
         ForwardDiff.gradient!(g_nonzero, e.J_U_vec, U_vec)
     else
@@ -542,14 +714,14 @@ function MOI.eval_objective_gradient(e::PMMH_OCP_Evaluator, grad::Vector{Float64
 end
 
 # Evaluate the constraint vector h(z).
-function MOI.eval_constraint(e::PMMH_OCP_Evaluator, h::Vector{Float64}, z::Vector{Float64})
-    # Get the inputs U
-    U = reshape(@view z[e.indices_U], n_u, H)
-
+function MOI.eval_constraint(e::PMMH_OCP_Evaluator, h::AbstractVector, z::AbstractVector)
     Threads.@threads for k in 1:e.K
-        # Local variables
-        X_k = reshape(@view z[e.indices_X[k]], n_x, H)
-        Y_k = reshape(@view z[e.indices_Y[k]], n_y, H)
+        # Get local variables
+        if !e.J_u
+            U, X_k, Y_k, J_max = unpack_z_k(z, k, e.indices_U, e.indices_X, e.indices_Y, e.index_J_max, e.n_u, e.n_x, e.n_y, e.H, e.J_u)
+        else
+            U, X_k, Y_k = unpack_z_k(z, k, e.indices_U, e.indices_X, e.indices_Y, e.index_J_max, e.n_u, e.n_x, e.n_y, e.H, e.J_u)
+        end
 
         # Local slices of the constraint vector h
         h_dyn_x = @views h[e.indices_h_dynamics_x[k]]
@@ -568,15 +740,15 @@ function MOI.eval_constraint(e::PMMH_OCP_Evaluator, h::Vector{Float64}, z::Vecto
 
         # Epigraph rows of constraint vector.
         if !e.J_u
-            J_max = @view z[e.index_J_max]
             h_J_max = @views h[e.indices_h_J_max[k]]
-            h_J_max!(h_J_max, U, X_k, Y_k, J_max)
+            e.h_J_max!(h_J_max, U, X_k, Y_k, J_max)
         end
     end
 
     # Evaluate the input constraints h_u(U)
+    U_vec = view_U_vec(z, e.indices_U)
     h_u = @views h[e.indices_h_u]
-    e.h_u!(h_u, U)
+    e.h_u!(h_u, U_vec)
     return h
 end
 
@@ -586,23 +758,11 @@ function MOI.jacobian_structure(e::PMMH_OCP_Evaluator)
 end
 
 # Evaluate the Jacobian of the constraints.
-function MOI.eval_constraint_jacobian(e::PMMH_OCP_Evaluator,
-    constraint_Jacobian_values::Vector{Float64},
-    z::Vector{Float64})
-
-    # Get the inputs U
-    U_vec = @views z[e.indices_U]
+function MOI.eval_constraint_jacobian(e::PMMH_OCP_Evaluator, constraint_Jacobian_values::AbstractVector, z::AbstractVector)
 
     Threads.@threads for k in 1:e.K
-        # Local variables
-        X_k_vec = @views z[e.indices_X[k]]
-        Y_k_vec = @views z[e.indices_Y[k]]
-        if !e.J_u
-            J_max = @view z[e.index_J_max]
-            z_k = [U_vec; X_k_vec; Y_k_vec; J_max]
-        else
-            z_k = [U_vec; X_k_vec; Y_k_vec]
-        end
+        # Local decision vector
+        z_scenario = view_z_scenario(z, k, e.indices_U, e.indices_X, e.indices_Y, e.index_J_max, e.J_u)
 
         V_k = @views e.V[:, :, k]
         W_k = @views e.W[:, :, k]
@@ -614,8 +774,8 @@ function MOI.eval_constraint_jacobian(e::PMMH_OCP_Evaluator,
         Jacobian_h_dynamics_y = Float64.(e.Jac_pattern_h_dynamics_y)
 
         # Compute Jacobian of the dynamic constraints for one scenario.
-        SparseDiffTools.forwarddiff_color_jacobian!(Jacobian_h_dynamics_x, (h_dyn_x, z) -> e.h_dynamics_x!(h_dyn_x, z, theta_k, V_k), z_k, colorvec=e.colors_h_dynamics_x, sparsity=e.Jac_pattern_h_dynamics_x)
-        SparseDiffTools.forwarddiff_color_jacobian!(Jacobian_h_dynamics_y, (h_dyn_y, z) -> e.h_dynamics_y!(h_dyn_y, z, theta_k, W_k), z_k, colorvec=e.colors_h_dynamics_y, sparsity=e.Jac_pattern_h_dynamics_y)
+        SparseDiffTools.forwarddiff_color_jacobian!(Jacobian_h_dynamics_x, (h_dyn_x, z) -> e.h_dynamics_x!(h_dyn_x, z, theta_k, V_k), z_scenario, colorvec=e.colors_h_dynamics_x, sparsity=e.Jac_pattern_h_dynamics_x)
+        SparseDiffTools.forwarddiff_color_jacobian!(Jacobian_h_dynamics_y, (h_dyn_y, z) -> e.h_dynamics_y!(h_dyn_y, z, theta_k, W_k), z_scenario, colorvec=e.colors_h_dynamics_y, sparsity=e.Jac_pattern_h_dynamics_y)
 
         # Fill the values to the vector containing the non-zero entries of the constraint Jacobian.
         constraint_Jacobian_values[e.nzrange_h_dynamics_x[k]] .= Jacobian_h_dynamics_x.nzval
@@ -623,18 +783,19 @@ function MOI.eval_constraint_jacobian(e::PMMH_OCP_Evaluator,
 
         # Compute Jacobian of the scenario constraints for one scenario and fill the values to the vector containing the non-zero entries of the constraint Jacobian.
         Jacobian_h_scenario = Float64.(e.Jac_pattern_h_scenario)
-        SparseDiffTools.forwarddiff_color_jacobian!(Jacobian_h_scenario, e.h_scenario!, z_k, colorvec=e.colors_h_scenario, sparsity=e.Jac_pattern_h_scenario)
+        SparseDiffTools.forwarddiff_color_jacobian!(Jacobian_h_scenario, e.h_scenario!, z_scenario, colorvec=e.colors_h_scenario, sparsity=e.Jac_pattern_h_scenario)
         constraint_Jacobian_values[e.nzrange_h_scenario[k]] .= Jacobian_h_scenario.nzval
 
         # Compute the Jacobian of the epigraph constraint J^[k] - J_max <= 0 (if used) and fill the values to the vector containing the non-zero entries of the constraint Jacobian.
         if !e.J_u
             Jacobian_h_J_max = Float64.(e.Jac_pattern_h_J_max)
-            SparseDiffTools.forwarddiff_color_jacobian!(Jacobian_h_J_max, e.h_J_max!, z_k, colorvec=e.colors_h_J_max, sparsity=e.Jac_pattern_h_J_max)
+            SparseDiffTools.forwarddiff_color_jacobian!(Jacobian_h_J_max, e.h_J_max!, z_scenario, colorvec=e.colors_h_J_max, sparsity=e.Jac_pattern_h_J_max)
             constraint_Jacobian_values[e.nzrange_h_J_max[k]] .= Jacobian_h_J_max.nzval
         end
     end
 
     # Evaluate the Jacobian of the input constraints h_u(U) and fill the values to the vector containing the non-zero entries of the constraint Jacobian.
+    U_vec = view_U_vec(z, e.indices_U)
     Jacobian_h_u = Float64.(e.Jac_pattern_h_u)
     SparseDiffTools.forwarddiff_color_jacobian!(Jacobian_h_u, e.h_u!, U_vec, colorvec=e.colors_h_u, sparsity=e.Jac_pattern_h_u)
     constraint_Jacobian_values[e.nzrange_h_u] .= Jacobian_h_u.nzval
