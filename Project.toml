@@ -1,4 +1,4 @@
-name = "PMMHopt"
+name = "PMCMCopt"
 uuid = "17028b3b-3179-4927-b3cd-473f26271115"
 authors = ["Robert Lefringhausen <robert.lefringhausen@tum.de>"]
 version = "0.1.0"

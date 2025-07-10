@@ -1,29 +1,29 @@
 """
-    compute_ess(PMMH_samples::Vector{PMMH_sample}; max_lag::Int=100)
+    compute_ess(PMCMC_samples::Vector{PMCMC_sample}; max_lag::Int=100)
 
 Compute the effective sample size (ESS) for each parameter and state.
 
 # Arguments
-- `PMMH_samples`: PMMH samples
+- `PMCMC_samples`: PMCMC samples
 - `max_lag`: maximum lag for autocorrelation estimation.
 
 # Returns
 - `ess`: vector of ESS estimates for all variables.
 """
-function compute_ess(PMMH_samples::Vector{PMMH_sample}; max_lag::Int=100)
+function compute_ess(PMCMC_samples::Vector{PMCMC_sample}; max_lag::Int=100)
     # Get number of models.
-    K = size(PMMH_samples, 1)
+    K = size(PMCMC_samples, 1)
 
-    # Get number of parameters of the PMMH samples.
-    n_variables = length(PMMH_samples[1].theta) + size(PMMH_samples[1].x_m1, 1)
+    # Get number of parameters of the PMCMC samples.
+    n_variables = length(PMCMC_samples[1].theta) + size(PMCMC_samples[1].x_m1, 1)
 
-    # Fill matrix with the series of the parameters of the PMMH samples.
+    # Fill matrix with the series of the parameters of the PMCMC samples.
     sample_matrix = Array{Float64}(undef, K, n_variables)
     for i in 1:K
         # Sample initial state.
-        star = sample(1:length(PMMH_samples[i].w_m1), Weights(PMMH_samples[i].w_m1))
-        x_m1 = PMMH_samples[i].x_m1[:, star]
-        sample_matrix[i, :] .= [PMMH_samples[i].theta; vec(x_m1)]
+        star = sample(1:length(PMCMC_samples[i].w_m1), Weights(PMCMC_samples[i].w_m1))
+        x_m1 = PMCMC_samples[i].x_m1[:, star]
+        sample_matrix[i, :] .= [PMCMC_samples[i].theta; vec(x_m1)]
     end
 
     # Calculate the autocorrelation.
@@ -48,26 +48,26 @@ function compute_ess(PMMH_samples::Vector{PMMH_sample}; max_lag::Int=100)
 end
 
 """
-    compute_gelman_rubin(PMMH_chains::Vector{Vector{PMMH_sample}})
+    compute_gelman_rubin(PMCMC_chains::Vector{Vector{PMCMC_sample}})
 
-Compute the Gelman–Rubin statistic for each parameter and latent state from a vector of PMMH chains.
+Compute the Gelman–Rubin statistic for each parameter and latent state from a vector of PMCMC chains.
 
 # Arguments
-- `PMMH_chains`: vector of chains, where each chain is a vector of PMMH samples
+- `PMCMC_chains`: vector of chains, where each chain is a vector of PMCMC samples
 
 # Returns
 - `R_hat`: vector of R̂ values, one for each variable
 """
-function compute_gelman_rubin(PMMH_chains::Vector{Vector{PMMH_sample}})
-    M = length(PMMH_chains) # Number of chains
-    K = length(PMMH_chains[1]) # Number of samples per chain
+function compute_gelman_rubin(PMCMC_chains::Vector{Vector{PMCMC_sample}})
+    M = length(PMCMC_chains) # Number of chains
+    K = length(PMCMC_chains[1]) # Number of samples per chain
 
-    # Get number of parameters of the PMMH samples.
-    n_variables = length(PMMH_chains[1][1].theta) + size(PMMH_chains[1][1].x_m1, 1)
+    # Get number of parameters of the PMCMC samples.
+    n_variables = length(PMCMC_chains[1][1].theta) + size(PMCMC_chains[1][1].x_m1, 1)
 
     # Extract samples from each chain
     sample_matrices_chains = Array{Float64}[]
-    for chain in PMMH_chains
+    for chain in PMCMC_chains
         sample_matrix = Array{Float64}(undef, K, n_variables)
 
         for i in 1:K
@@ -102,12 +102,12 @@ function compute_gelman_rubin(PMMH_chains::Vector{Vector{PMMH_sample}})
 end
 
 """
-    test_prediction(PMMH_samples::Vector{PMMH_sample}, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, u_test, y_test)
+    test_prediction(PMCMC_samples::Vector{PMCMC_sample}, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, u_test, y_test)
 
-Simulate the PMMH samples forward in time and compare the predictions to the test data.
+Simulate the PMCMC samples forward in time and compare the predictions to the test data.
 
 # Arguments
-- `PMMH_samples`: PMMH samples
+- `PMCMC_samples`: PMCMC samples
 - `n_x`: number of states
 - `f_theta`: state transition function parametrized by theta; has inputs (theta, x, u)
 - `g_theta`: measurement function parametrized by theta; has inputs (theta, x, u)
@@ -117,11 +117,11 @@ Simulate the PMMH samples forward in time and compare the predictions to the tes
 - `u_test`: test input
 - `y_test`: test output
 """
-function test_prediction(PMMH_samples::Vector{PMMH_sample}, n_x::Int, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, k_n::Int, u_test::AbstractMatrix{<:AbstractFloat}, y_test::AbstractMatrix{<:AbstractFloat})
+function test_prediction(PMCMC_samples::Vector{PMCMC_sample}, n_x::Int, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, k_n::Int, u_test::AbstractMatrix{<:AbstractFloat}, y_test::AbstractMatrix{<:AbstractFloat})
     println("### Testing model")
 
     # Get number of models, etc.
-    K = size(PMMH_samples, 1)
+    K = size(PMCMC_samples, 1)
     n_y = size(y_test, 1)
     T_test = size(y_test, 2)
 
@@ -132,10 +132,10 @@ function test_prediction(PMMH_samples::Vector{PMMH_sample}, n_x::Int, f_theta::F
     # Simulate models forward.
     Threads.@threads for k in 1:K
         # Get current model.
-        f(x, u) = f_theta(PMMH_samples[k].theta, x, u)
-        g(x, u) = g_theta(PMMH_samples[k].theta, x, u)
-        sample_v(N) = sample_v_theta(PMMH_samples[k].theta, N)
-        sample_w(N) = sample_w_theta(PMMH_samples[k].theta, N)
+        f(x, u) = f_theta(PMCMC_samples[k].theta, x, u)
+        g(x, u) = g_theta(PMCMC_samples[k].theta, x, u)
+        sample_v(N) = sample_v_theta(PMCMC_samples[k].theta, N)
+        sample_w(N) = sample_w_theta(PMCMC_samples[k].theta, N)
 
         # Simulate each model k_n times.
         for kn in 1:k_n
@@ -144,9 +144,9 @@ function test_prediction(PMMH_samples::Vector{PMMH_sample}, n_x::Int, f_theta::F
             y_loop = Array{Float64}(undef, n_y, T_test)
 
             # Sample initial state.
-            star = sample(1:length(PMMH_samples[k].w_m1), Weights(PMMH_samples[k].w_m1))
-            x_m1 = PMMH_samples[k].x_m1[:, star]
-            x_loop[:, 1] .= f(x_m1, PMMH_samples[k].u_m1) + sample_v(1)
+            star = sample(1:length(PMCMC_samples[k].w_m1), Weights(PMCMC_samples[k].w_m1))
+            x_m1 = PMCMC_samples[k].x_m1[:, star]
+            x_loop[:, 1] .= f(x_m1, PMCMC_samples[k].u_m1) + sample_v(1)
 
             # Simulate model forward.
             for t in 1:T_test
@@ -237,28 +237,28 @@ function plot_predictions(y_pred::AbstractArray, y_test::AbstractMatrix{<:Abstra
 end
 
 """
-    plot_autocorrelation(PMMH_samples::Vector{PMMH_sample}; max_lag=0)
+    plot_autocorrelation(PMCMC_samples::Vector{PMCMC_sample}; max_lag=0)
 
-Plot the autocorrelation function (ACF) of the PMMH samples. This might be helpful when adjusting the thinning parameter ``k_d``.
+Plot the autocorrelation function (ACF) of the PMCMC samples. This might be helpful when adjusting the thinning parameter ``k_d``.
 
 # Arguments
-- `PMMH_samples`: PMMH samples
+- `PMCMC_samples`: PMCMC samples
 - `max_lag`: maximum lag at which to calculate the ACF
 """
-function plot_autocorrelation(PMMH_samples::Vector{PMMH_sample}; max_lag::Int=100)
+function plot_autocorrelation(PMCMC_samples::Vector{PMCMC_sample}; max_lag::Int=100)
     # Get number of models.
-    K = size(PMMH_samples, 1)
+    K = size(PMCMC_samples, 1)
 
-    # Get number of parameters of the PMMH samples.
-    n_variables = length(PMMH_samples[1].theta) + size(PMMH_samples[1].x_m1, 1)
+    # Get number of parameters of the PMCMC samples.
+    n_variables = length(PMCMC_samples[1].theta) + size(PMCMC_samples[1].x_m1, 1)
 
-    # Fill matrix with the series of the parameters of the PMMH samples.
+    # Fill matrix with the series of the parameters of the PMCMC samples.
     sample_matrix = Array{Float64}(undef, K, n_variables)
     for i in 1:K
         # Sample state at the last timestep of the training dataset.
-        star = sample(1:length(PMMH_samples[i].w_m1), Weights(PMMH_samples[i].w_m1))
-        x_m1 = PMMH_samples[i].x_m1[:, star]
-        sample_matrix[i, :] .= [PMMH_samples[i].theta; vec(x_m1)]
+        star = sample(1:length(PMCMC_samples[i].w_m1), Weights(PMCMC_samples[i].w_m1))
+        x_m1 = PMCMC_samples[i].x_m1[:, star]
+        sample_matrix[i, :] .= [PMCMC_samples[i].theta; vec(x_m1)]
     end
 
     # Calculate the autocorrelation.
@@ -270,12 +270,12 @@ function plot_autocorrelation(PMMH_samples::Vector{PMMH_sample}; max_lag::Int=10
         if i == 1
             # Plot the ACF of the elements of theta.
             plot!(Array(0:max_lag), autocorrelation[:, i], lc=:red, lw=2, label="\$\\theta\$")
-        elseif 1 < i <= length(PMMH_samples[1].theta)
+        elseif 1 < i <= length(PMCMC_samples[1].theta)
             plot!(Array(0:max_lag), autocorrelation[:, i], lc=:red, lw=2, label="")
-        elseif i == length(PMMH_samples[1].theta) + 1
+        elseif i == length(PMCMC_samples[1].theta) + 1
             # Plot the ACF of the elements of x_t-1.
             plot!(Array(0:max_lag), autocorrelation[:, i], lc=:green, lw=2, label="\$x(t-1)\$")
-        elseif length(PMMH_samples[1].theta) + 1 < i
+        elseif length(PMCMC_samples[1].theta) + 1 < i
             plot!(Array(0:max_lag), autocorrelation[:, i], lc=:green, lw=2, label="")
         end
     end
@@ -287,36 +287,36 @@ function plot_autocorrelation(PMMH_samples::Vector{PMMH_sample}; max_lag::Int=10
 end
 
 """
-    plot_parameter_trace(PMMH_samples::Vector{PMMH_sample})
-Plot the trace of the parameters of the PMMH samples.
+    plot_parameter_trace(PMCMC_samples::Vector{PMCMC_sample})
+Plot the trace of the parameters of the PMCMC samples.
 # Arguments
-- `PMMH_samples`: PMMH samples
+- `PMCMC_samples`: PMCMC samples
 """
-function plot_parameter_trace(PMMH_samples::Vector{PMMH_sample})
+function plot_parameter_trace(PMCMC_samples::Vector{PMCMC_sample})
     # Get number of models.
-    K = size(PMMH_samples, 1)
+    K = size(PMCMC_samples, 1)
 
-    # Get number of parameters of the PMMH samples.
-    n_variables = length(PMMH_samples[1].theta) + size(PMMH_samples[1].x_m1, 1)
+    # Get number of parameters of the PMCMC samples.
+    n_variables = length(PMCMC_samples[1].theta) + size(PMCMC_samples[1].x_m1, 1)
 
-    # Fill matrix with the series of the parameters of the PMMH samples.
+    # Fill matrix with the series of the parameters of the PMCMC samples.
     sample_matrix = Array{Float64}(undef, K, n_variables)
     for i in 1:K
         # Sample state at the last timestep of the training dataset.
-        star = sample(1:length(PMMH_samples[i].w_m1), Weights(PMMH_samples[i].w_m1))
-        x_m1 = PMMH_samples[i].x_m1[:, star]
-        sample_matrix[i, :] .= [PMMH_samples[i].theta; vec(x_m1)]
+        star = sample(1:length(PMCMC_samples[i].w_m1), Weights(PMCMC_samples[i].w_m1))
+        x_m1 = PMCMC_samples[i].x_m1[:, star]
+        sample_matrix[i, :] .= [PMCMC_samples[i].theta; vec(x_m1)]
     end
 
     # Plot the trace of the parameters.
     for i in 1:n_variables
         p = plot(Array(0:K-1), sample_matrix[:, i], lw=2, legend=false)
-        if i <= length(PMMH_samples[1].theta)
+        if i <= length(PMCMC_samples[1].theta)
             title!("Trace of \$\\theta_{$i}\$")
             ylabel!("\$\\theta_{$i}\$")
         else
-            title!("Trace of \$x_{$(i-length(PMMH_samples[1].theta))}\$")
-            ylabel!("\$x_{$(i-length(PMMH_samples[1].theta))}(t-1)\$")
+            title!("Trace of \$x_{$(i-length(PMCMC_samples[1].theta))}\$")
+            ylabel!("\$x_{$(i-length(PMCMC_samples[1].theta))}(t-1)\$")
         end
         xlabel!("Iteration")
         display(p)
@@ -324,37 +324,37 @@ function plot_parameter_trace(PMMH_samples::Vector{PMMH_sample})
 end
 
 """
-    plot_parameter_pdf(PMMH_samples::Vector{PMMH_sample}; bins = 50, prior_pdf::Union{Nothing,Vector{Tuple{Vector{Float64},Vector{Float64}}}}=nothing, true_values=nothing)
+    plot_parameter_pdf(PMCMC_samples::Vector{PMCMC_sample}; bins = 50, prior_pdf::Union{Nothing,Vector{Tuple{Vector{Float64},Vector{Float64}}}}=nothing, true_values=nothing)
 
-Plots an histrogram (empirical probability density fuction (PDF) estimate) for the parameters and the initial state (t=0). If provided, overlays the prior density for each variable and the true value.
+Plots an histogram (empirical probability density function (PDF) estimate) for the parameters and the initial state (t=0). If provided, overlays the prior density for each variable and the true value.
 
 # Arguments
-- `PMMH_samples`: PMMH samples
+- `PMCMC_samples`: PMCMC samples
 - `bins`: number of bins to use for the histogram
 - `prior_pdf`: vector of prior density values for each parameter and latent initial state
 - `true_values`: true values for each parameter and latent initial state
 """
-function plot_parameter_pdf(PMMH_samples::Vector{PMMH_sample}; bins::Int=50, prior_pdf::Union{Nothing,Vector{Tuple{Vector{Float64},Vector{Float64}}}}=nothing, true_values::AbstractVector{<:AbstractFloat}=nothing)
+function plot_parameter_pdf(PMCMC_samples::Vector{PMCMC_sample}; bins::Int=50, prior_pdf::Union{Nothing,Vector{Tuple{Vector{Float64},Vector{Float64}}}}=nothing, true_values::AbstractVector{<:AbstractFloat}=nothing)
     # Get number of models.
-    K = size(PMMH_samples, 1)
+    K = size(PMCMC_samples, 1)
 
-    # Get number of parameters of the PMMH samples.
-    n_variables = length(PMMH_samples[1].theta) + size(PMMH_samples[1].x_m1, 1)
+    # Get number of parameters of the PMCMC samples.
+    n_variables = length(PMCMC_samples[1].theta) + size(PMCMC_samples[1].x_m1, 1)
 
-    # Fill matrix with the series of the parameters of the PMMH samples.
+    # Fill matrix with the series of the parameters of the PMCMC samples.
     sample_matrix = Array{Float64}(undef, K, n_variables)
     for i in 1:K
         # Sample state at the last timestep of the training dataset.
         #=
-        star = sample(1:length(PMMH_samples[i].w_m1), Weights(PMMH_samples[i].w_m1))
-        x_m1 = PMMH_samples[i].x_m1[:, star]
-        sample_matrix[i, :] .= [PMMH_samples[i].theta; vec(x_m1)]
+        star = sample(1:length(PMCMC_samples[i].w_m1), Weights(PMCMC_samples[i].w_m1))
+        x_m1 = PMCMC_samples[i].x_m1[:, star]
+        sample_matrix[i, :] .= [PMCMC_samples[i].theta; vec(x_m1)]
         =#
 
         # Sample state at the first timestep of the training dataset.
-        star = sample(1:length(PMMH_samples[i].w_0), Weights(PMMH_samples[i].w_0))
-        x_0 = PMMH_samples[i].x_0[:, star]
-        sample_matrix[i, :] .= [PMMH_samples[i].theta; vec(x_0)]
+        star = sample(1:length(PMCMC_samples[i].w_0), Weights(PMCMC_samples[i].w_0))
+        x_0 = PMCMC_samples[i].x_0[:, star]
+        sample_matrix[i, :] .= [PMCMC_samples[i].theta; vec(x_0)]
     end
 
     for i in 1:n_variables
@@ -371,12 +371,12 @@ function plot_parameter_pdf(PMMH_samples::Vector{PMMH_sample}; bins::Int=50, pri
             plot!([true_values[i]], seriestype=:vline, label="True", lw=2)
         end
 
-        if i <= length(PMMH_samples[1].theta)
+        if i <= length(PMCMC_samples[1].theta)
             title!("Sample PDF of \$\\theta_{$i}\$")
             xlabel!("\$\\theta_{$i}\$")
         else
-            title!("Sample PDF of \$x_{$(i-length(PMMH_samples[1].theta))}(t=0)\$")
-            xlabel!("\$x_{$(i-length(PMMH_samples[1].theta))}\$")
+            title!("Sample PDF of \$x_{$(i-length(PMCMC_samples[1].theta))}(t=0)\$")
+            xlabel!("\$x_{$(i-length(PMCMC_samples[1].theta))}\$")
         end
         ylabel!("Density")
         display(p)

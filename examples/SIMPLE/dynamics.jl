@@ -1,4 +1,4 @@
-const eps = 1e-5
+const eps = 1e-4
 
 """
     smax(a, b)

@@ -660,7 +660,7 @@ version = "1.0.2"
 
 [[deps.HSL_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "METIS_jll", "MPICH_jll", "MicrosoftMPI_jll", "Pkg", "libblastrampoline_jll"]
-path = "../HSL_jll.jl.v2024.11.28"
+path = "C:/Users/Robert Lefringhausen/Documents/pmcmc-for-vertical-farming/.devcontainer/HSL_jll.jl.v2024.11.28/HSL_jll.jl.v2024.11.28"
 uuid = "017b0a0e-03f4-516a-9b91-836bbd1904dd"
 version = "2024.11.28+0"
 

@@ -10,7 +10,7 @@ using JLD2
 using JuMP
 import HSL_jll
 
-using PMMHopt
+using PMCMCopt
 
 include("SIMPLE/SIMPLE.jl")
 include("TOMGRO/TOMGRO.jl")
@@ -20,11 +20,11 @@ using .TOMGRO
 # Specify seed (for reproducible results).
 Random.seed!(1)
 
-# Time PMMH algorithm.
+# Time PMCMC algorithm.
 sampling_timer = time()
 
 # Learning parameters.
-K = Int(1e2) # number of PMMH samples in final stage
+K = Int(1e2) # number of PMCMC samples in final stage
 K_pre_solve = 10 # number of samples used to pre-solve the OCP to get a good initial guess
 k_d = 0 # number of samples to be skipped to decrease correlation (thinning)
 K_b = 200 # length of burn-in period for each stage
@@ -133,13 +133,13 @@ y_test = y[:, T_train+1:end]
 
 # Run a staged PMMH sampler.
 # Aim for an acceptance ratio of around 20–30% for a random-walk proposal.
-# PMMH_samples, acceptance_ratio, time_sampling = PMMHopt.staged_PMMH(u_training, y_training, n_x, K + K_pre_solve, K_b, k_d, N_init, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
+# PMMH_samples, acceptance_ratio, time_sampling = PMCMCopt.staged_PMMH(u_training, y_training, n_x, K + K_pre_solve, K_b, k_d, N_init, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
 @load "PMMH_samples.jld2" PMMH_samples
 
 PMMH_samples_optimization = PMMH_samples[1:K]
 PMMH_samples_pre_solve = PMMH_samples[K+1:K+K_pre_solve]
 
-# Formulate the optimal control problem (OCP) using the PMMH samples.
+# Formulate the optimal control problem (OCP) using the PMCMC samples.
 
 # Revenue from selling the crops.
 # The price for the crop is set well above current prices as vertical farming is not yet economically competitive.
@@ -184,12 +184,12 @@ H = 30 # time horizon in days
 K_warmup = ceil(Int, K_pre_solve / 4) # number of samples used to warmup the initialization process of the OCP to get a good initial guess fast
 
 # Ipopt options
-Ipopt_options = Dict("max_iter" => 100000, "tol" => 1e-6, "acceptable_tol" => 1e-4, "hsllib" => HSL_jll.libhsl_path, "linear_solver" => "ma57", "hessian_approximation" => "exact", "print_level" => 5, "derivative_test" => "first-order", "derivative_test_tol" => 1e-5) # "hessian_approximation" => "limited-memory", "nlp_scaling_method" => "gradient-based", "mu_strategy" => "adaptive"
+Ipopt_options = Dict("max_iter" => 1000, "tol" => 1e-6, "acceptable_tol" => 1e-4, "hsllib" => HSL_jll.libhsl_path, "linear_solver" => "ma57", "hessian_approximation" => "limited-memory", "print_level" => 5) # "hessian_approximation" => "limited-memory", "nlp_scaling_method" => "gradient-based", "mu_strategy" => "adaptive"
 
 # Start optimization.
 U_init = zeros(n_u, H) # initial guess for the input trajectory
-# U_opt, X_opt, Y_opt, J_opt, solve_successful, iterations = PMMHopt.solve_PMMH_OCP(PMMH_samples, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; U_init=U_init, PMMH_samples_pre_solve=PMMH_samples_pre_solve, K_warmup=K_warmup, solver_opts=Ipopt_options)
-# U_opt, X_opt, Y_opt, J_opt, solve_successful, iterations = PMMHopt.solve_PMMH_OCP(PMMH_samples, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; U_init=U_init, solver_opts=Ipopt_options)
+U_opt, X_opt, Y_opt, J_opt, solve_successful, iterations = PMCMCopt.solve_PMCMC_OCP(PMMH_samples, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; U_init=U_init, PMCMC_samples_pre_solve=PMMH_samples_pre_solve, K_warmup=K_warmup, solver_opts=Ipopt_options)
+# U_opt, X_opt, Y_opt, J_opt, solve_successful, iterations = PMCMCopt.solve_PMCMC_OCP(PMMH_samples, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; U_init=U_init, solver_opts=Ipopt_options)
 
 # Helper function to simulate the system forward using different input trajectories and noise realizations.
 function simulate_system(f, g, x_t, u, V, W)
@@ -223,13 +223,14 @@ W = reshape(sample_w_theta(theta_true, H), n_y, H, 1)
 # plot_predictions(Y_opt, y_true_opt)
 
 # Simulate the system forward using the initialization of the optimal control problem as input trajectory.
+#=
 x_true_init, y_true_init = simulate_system(f_true, g_true, x_test[:, 1], U_init, V, W)
 profit_init = profit(U_init, x_true_init, y_true_init)
 
 # Determine optimal profit (assuming perfect knowledge of the system and noise realizations).
-PMMH_true_system = [PMMH_sample(theta_true, x_training[:, end], [1.0], u_training[:, end], x_0_true, [1.0])]
+PMCMC_true_system = [PMCMC_sample(theta_true, x_training[:, end], [1.0], u_training[:, end], x_0_true, [1.0])]
 
-U_known_system, X_known_system, Y_known_system, J_known_system = PMMHopt.solve_PMMH_OCP(PMMH_true_system, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; X_t=x_test[:, [1]], V=V, W=W, U_init=U_init, solver_opts=Ipopt_options)[1:4]
+U_known_system, X_known_system, Y_known_system, J_known_system = PMCMCopt.solve_PMCMC_OCP(PMCMC_true_system, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; X_t=x_test[:, [1]], V=V, W=W, U_init=U_init, solver_opts=Ipopt_options)[1:4]
 
 x_true_known_system, y_true_known_system = simulate_system(f_true, g_true, x_test[:, 1], U_known_system, V, W)
 profit_known_system = profit(U_known_system, x_true_known_system, y_true_known_system)
@@ -239,7 +240,6 @@ profit_known_system = profit(U_known_system, x_true_known_system, y_true_known_s
 @printf("Profit of the initialization of the OCP:                           %.2f\n", profit_init)
 @printf("Optimal profit (perfect knowledge of model + noise realization):   %.2f\n", profit_known_system)
 
-#=
 # Plot the optimal input trajectory.
 t = 1:H
 for i in 1:n_u

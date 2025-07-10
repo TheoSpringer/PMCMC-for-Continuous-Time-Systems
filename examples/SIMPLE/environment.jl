@@ -143,3 +143,27 @@ function f_theta(theta::AbstractVector{<:Number},
 
     return x_next
 end
+
+function f_theta(theta::AbstractVector{<:AbstractFloat},
+    x::Union{AbstractVector{<:JuMP.AbstractJuMPScalar},AbstractMatrix{<:JuMP.AbstractJuMPScalar}},
+    u::Union{AbstractVector{<:JuMP.AbstractJuMPScalar},AbstractMatrix{<:JuMP.AbstractJuMPScalar}})
+
+    parameters = SIMPLE_parameters(theta[1], theta[2], 6.0, 26.0, 1.00 * 1e-3, 100.0, 5.0, 32.0, 45.0, 0.07, 2.5, 0.95, 0.68)
+
+    N = size(x, 2)
+    x_next = Array{JuMP.AbstractJuMPScalar}(undef, size(x)...)
+
+    for i = 1:N
+        # Convert x and u from vector notation to the corresponding structs.
+        state = SIMPLE_state(x[1, i], x[2, i], x[3, i])
+        input = SIMPLE_input(u[1, i], u[2, i], u[3, i], 700.0)
+
+        # Update the state.
+        updated_state = step(parameters, state, input)
+
+        # Convert the updated state back to a vector.
+        x_next[:, i] = [updated_state.mB; updated_state.tau; updated_state.I50B]
+    end
+
+    return x_next
+end

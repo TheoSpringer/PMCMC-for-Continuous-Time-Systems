@@ -11,7 +11,6 @@ This module simulates the growth of plants based on environmental factors such a
 module SIMPLE
 using Plots
 using JuMP
-using Symbolics
 
 export SIMPLE_parameters, SIMPLE_state, SIMPLE_input, reset, step!, get_yield, plot_history
 
