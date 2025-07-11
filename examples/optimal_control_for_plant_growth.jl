@@ -184,11 +184,11 @@ H = 30 # time horizon in days
 K_warmup = ceil(Int, K_pre_solve / 4) # number of samples used to warmup the initialization process of the OCP to get a good initial guess fast
 
 # Ipopt options
-Ipopt_options = Dict("max_iter" => 1000, "tol" => 1e-6, "acceptable_tol" => 1e-4, "hsllib" => HSL_jll.libhsl_path, "linear_solver" => "ma57", "hessian_approximation" => "limited-memory", "print_level" => 5) # "hessian_approximation" => "limited-memory", "nlp_scaling_method" => "gradient-based", "mu_strategy" => "adaptive"
+Ipopt_options = Dict("max_iter" => 1000, "tol" => 1e-6, "acceptable_tol" => 1e-4, "hsllib" => HSL_jll.libhsl_path, "linear_solver" => "ma57", "hessian_approximation" => "limited-memory") # "hessian_approximation" => "limited-memory", "nlp_scaling_method" => "gradient-based", "mu_strategy" => "adaptive"
 
 # Start optimization.
 U_init = zeros(n_u, H) # initial guess for the input trajectory
-U_opt, X_opt, Y_opt, J_opt, solve_successful, iterations = PMCMCopt.solve_PMCMC_OCP(PMMH_samples, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; U_init=U_init, PMCMC_samples_pre_solve=PMMH_samples_pre_solve, K_warmup=K_warmup, solver_opts=Ipopt_options)
+U_opt, X_opt, Y_opt, J_opt, solve_successful, iterations = PMCMCopt.solve_PMCMC_OCP(PMMH_samples, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; U_init=U_init, PMCMC_samples_pre_solve=PMMH_samples_pre_solve, K_warmup=K_warmup, solver_opts=Ipopt_options, print_progress=false)
 # U_opt, X_opt, Y_opt, J_opt, solve_successful, iterations = PMCMCopt.solve_PMCMC_OCP(PMMH_samples, f_theta, g_theta, sample_v_theta, sample_w_theta, H, J, h_scenario, h_u; U_init=U_init, solver_opts=Ipopt_options)
 
 # Helper function to simulate the system forward using different input trajectories and noise realizations.

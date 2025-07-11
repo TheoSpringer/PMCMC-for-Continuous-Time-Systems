@@ -179,7 +179,7 @@ function solve_PMCMC_OCP(PMCMC_samples::Vector{PMCMC_sample}, f_theta::Function,
     end
 
     if !print_progress
-        MOI.set(model, MOI.Silent(), true)
+        MOI.set(solver, MOI.Silent(), true)
     end
 
     # Solve OCP.
