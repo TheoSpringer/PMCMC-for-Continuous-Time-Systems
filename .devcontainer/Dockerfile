@@ -47,7 +47,7 @@ ENV JULIA_DEPOT_PATH="/home/developer/.julia"
 COPY --chown=${USER_NAME}:${USER_NAME} Project.toml Manifest.toml ${USER_HOME}/
 COPY --chown=${USER_NAME}:${USER_NAME} .devcontainer/HSL_jll.jl.v2024.11.28.tar.gz ${USER_HOME}/
 RUN tar -xzvf HSL_jll.jl.v2024.11.28.tar.gz \
-    && julia -e 'using Pkg; Pkg.activate("."); Pkg.develop(path="HSL_jll.jl.v2024.11.28"); Pkg.instantiate()' \
+    && julia -e 'using Pkg; Pkg.activate(); Pkg.develop(path="HSL_jll.jl.v2024.11.28", shared=true, preserve=Pkg.PRESERVE_TIERED); Pkg.instantiate(); Pkg.activate(.); Pkg.instantiate()' \
     && rm HSL_jll.jl.v2024.11.28.tar.gz \
     && rm HSL_jll.pdf\
     && rm build_tarballs.jl \

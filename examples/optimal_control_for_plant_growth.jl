@@ -8,7 +8,15 @@ using Printf
 using Base.Threads
 using JLD2
 using JuMP
-import HSL_jll
+
+global hsl_available = false
+try
+    import HSL_jll
+    global hsl_available = true
+catch e
+    @warn "Optional dependency HSL_jll not available. Falling back to the default solver MUMPS, which may result in increased runtimes or reduced numerical stability." exception = e
+    global hsl_available = false
+end
 
 using PMCMCopt
 
@@ -183,8 +191,13 @@ h_u(u) = [
 H = 30 # time horizon in days
 K_warmup = ceil(Int, K_pre_solve / 4) # number of samples used to warmup the initialization process of the OCP to get a good initial guess fast
 
-# Ipopt options
-Ipopt_options = Dict("max_iter" => 1000, "tol" => 1e-6, "acceptable_tol" => 1e-4, "hsllib" => HSL_jll.libhsl_path, "linear_solver" => "ma57", "hessian_approximation" => "limited-memory", "print_level" => 5) # "hessian_approximation" => "limited-memory", "nlp_scaling_method" => "gradient-based", "mu_strategy" => "adaptive"
+# IPOPT options.
+# See https://coin-or.github.io/Ipopt/OPTIONS.html for more details.
+Ipopt_options = Dict("max_iter" => 1000, "tol" => 1e-6, "acceptable_tol" => 1e-4, "linear_solver" => "mumps", "hessian_approximation" => "limited-memory", "print_level" => 5, "ma57_automatic_scaling" => "yes", "nlp_scaling_method" => "gradient-based")
+if hsl_available
+    Ipopt_options["hsllib"] = HSL_jll.libhsl_path
+    Ipopt_options["linear_solver"] = "ma57"
+end
 
 # Start optimization.
 U_init = zeros(n_u, H) # initial guess for the input trajectory

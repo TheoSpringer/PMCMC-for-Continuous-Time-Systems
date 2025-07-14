@@ -8,7 +8,6 @@ using Printf
 using Base.Threads
 using JLD2
 using JuMP
-import HSL_jll
 
 using PMCMCopt
 
