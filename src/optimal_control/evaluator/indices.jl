@@ -1,6 +1,8 @@
-# This file contains functions to handle the flat decision vector z containing the inputs U, states X of all scenarios, outputs Y of all scenarios, and (optionally) J_max,
-# the flat vector z_scenario containing the inputs U, states X_k for scenario k, outputs Y_k for scenario k, and (optionally) J_max,
-# and the flat constraint vector h(z) containing the dynamic, scenario, control, and (optionally) epigraph constraints.
+# This file contains functions to handle the flat decision vector z, the vector z_scenario, and the flat constraint vector h(z).
+# The flat decision vector z contains the inputs U, states X of all scenarios, outputs Y of all scenarios, and (optionally) J_max.
+# The flat vector z_scenario contains the inputs U, states X_k of scenario k, outputs Y_k of scenario k, and (optionally) J_max.
+# The flat constraint vector h(z) contains the dynamic, scenario, input, and (optionally) epigraph constraints.
+# Note that the structure of the constraint vector h(z) also defines the structure of the vector lambda, which contains the Lagrange multipliers for the constraints in h(z).
 #
 # z = [ 
 #       u_1(t=1);
@@ -27,7 +29,8 @@
 #       y_{n_y}(t=H)^[k=1];
 #       y_1(t=1)^[k=2];
 #       ...;
-#       y_{n_y}(t=H)^[k=K]
+#       y_{n_y}(t=H)^[k=K];
+#       J_max (optional)
 #       ]
 #
 # z_scenario[k] = [ 
@@ -47,7 +50,8 @@
 #       ...; 
 #       y_{n_y}(t=1)^[k];
 #       ...;
-#       y_{n_y}(t=H)^[k]
+#       y_{n_y}(t=H)^[k];
+#       J_max (optional)
 #       ]
 #
 # h(z) = [  
@@ -92,7 +96,7 @@ function z_indices(n_u::Int, n_x::Int, n_y::Int, H::Int, K::Int, J_u::Bool)
     # Index for the maximum cost J_max (optional).
     if J_u
         # Cost is J(u) and there is no J_max.
-        index_J_max = 1:0 # empty range
+        index_J_max = nothing
     else
         # Epigraph notation is used and J_max is a decision variable.
         index_J_max = first_Y+K*n_y*H:first_Y+K*n_y*H
@@ -136,7 +140,7 @@ function unpack_z(z::AbstractVector, indices_U::UnitRange{Int}, indices_X::Vecto
     end
 end
 
-# This function returns the inputs U, states X_k, outputs Y_k, and (optionally) J_max for scenario k from the flat decision vector z.
+# This function returns the inputs U, states X_k for scenario k, outputs Y_k for scenario k, and (optionally) J_max from the flat decision vector z.
 function unpack_z_k(z::AbstractVector, k::Int, indices_U::UnitRange{Int}, indices_X::Vector{UnitRange{Int}}, indices_Y::Vector{UnitRange{Int}}, index_J_max::UnitRange{Int}, n_u::Int, n_x::Int, n_y::Int, H::Int, J_u::Bool)
     U = @views reshape(z[indices_U], n_u, H)
     X_k = @views reshape(z[indices_X[k]], n_x, H)
@@ -149,12 +153,13 @@ function unpack_z_k(z::AbstractVector, k::Int, indices_U::UnitRange{Int}, indice
     end
 end
 
-# Returns the control inputs U_vec from the flat decision vector z containing all decision variables.
+# Returns the control inputs U_vec (U_vec = vec(U)) from the flat decision vector z.
 function view_U_vec(z::AbstractVector, indices_U::UnitRange{Int})
     return @views z[indices_U]
 end
 
-# Returns the decision vector z_scenario that contains the inputs U, states X_k, outputs Y_k, and (optionally) J_max for scenario k from the flat decision vector z containing all decision variables.
+# Returns the vector z_scenario for scenario k from the flat decision vector z.
+# The vector z_scenario contains the inputs U, states X_k, outputs Y_k, and (optionally) J_max for scenario k.
 function view_z_scenario(z::AbstractVector, k::Int, indices_U::UnitRange{Int}, indices_X::Vector{UnitRange{Int}}, indices_Y::Vector{UnitRange{Int}}, index_J_max::UnitRange{Int}, J_u::Bool)
     U_vec = @views z[indices_U]
     X_k_vec = @views z[indices_X[k]]
@@ -168,7 +173,7 @@ function view_z_scenario(z::AbstractVector, k::Int, indices_U::UnitRange{Int}, i
     return z_scenario
 end
 
-# This function unpacks the inputs U, states X_k, outputs Y_k, and (optionally) J_max from the flat decision vector z_scenario that contains the decision variables for a single scenario.
+# This function unpacks the inputs U, states X_k, outputs Y_k, and (optionally) J_max from the flat decision vector z_scenario.
 function unpack_z_scenario(z_scenario::AbstractVector, n_u::Int, n_x::Int, n_y::Int, H::Int, J_u::Bool)
     U = @views reshape(z_scenario[1:n_u*H], n_u, H)
     X_k = @views reshape(z_scenario[n_u*H+1:n_u*H+n_x*H], n_x, H)
@@ -181,7 +186,28 @@ function unpack_z_scenario(z_scenario::AbstractVector, n_u::Int, n_x::Int, n_y::
     end
 end
 
-# This function returns the index ranges for dynamic constraints, the scenario constraints h_scenario, and the input constraints h_u inside the flat constraint vector h(z).
+# The following function translates indices with respect to the vector z_scenario to indices with respect to the global decision vector z.
+# The inputs offset_X and offset_Y are the offsets of the first entries of the state and output blocks of the considered scenario in the global decision vector z.
+function translate_local_index_to_global(local_index::Int, offset_X::Int, offset_Y::Int, n_u::Int, n_x::Int, n_y::Int, H::Int, indices_U::UnitRange{Int}, index_J_max::UnitRange{Int})
+    if local_index <= n_u * H
+        # Entry belongs to the input block.
+        global_index = indices_U[local_index]
+    elseif local_index <= n_u * H + n_x * H
+        # Entry belongs to the state block.
+        local_indices_X = local_index - n_u * H
+        global_index = offset_X + local_indices_X
+    elseif local_index <= n_u * H + n_x * H + n_y * H
+        # Entry belongs to the output block.
+        local_indices_Y = local_index - n_u * H - n_x * H
+        global_index = offset_Y + local_indices_Y
+    else
+        # Entry belongs to the J_max constraint.
+        global_index = first(index_J_max)
+    end
+    return global_index
+end
+
+# This function returns the index ranges for the dynamic constraints for the states, the dynamic constraints for the outputs, the scenario constraints h_scenario, the input constraints h_u, and (optionally) the epigraph constraints, inside the flat constraint vector h(z).
 function h_indices(n_x::Int, n_y::Int, H::Int, K::Int, n_h_scenario::Int, n_h_u::Int, J_u::Bool)
     # Indices for the dynamic constraints for the states (e.g., f^[k=1](x_1^[k=1],u_1) + w_1^[k=1] - x_2^[k=1] == 0)
     indices_h_dynamics_x = Vector{UnitRange{Int}}(undef, K)
@@ -209,56 +235,17 @@ function h_indices(n_x::Int, n_y::Int, H::Int, K::Int, n_h_scenario::Int, n_h_u:
     first_h_u = first_h_scenario + K * n_h_scenario
     indices_h_u = first_h_u:first_h_u+n_h_u-1
 
-    # Indices for the J^[k] - J_max <= 0 constraint (e.g., J(U, X^[k=1], Y_1^[k=1]) - J_max <= 0)
+    # Indices for the epigraph constraints (e.g., J(U, X^[k=1], Y_1^[k=1]) - J_max <= 0)
     indices_h_J_max = Vector{UnitRange{Int}}(undef, K)
     current_h_J_max = first_h_u + n_h_u
     for k in 1:K
         if J_u
             # Pass empty range if J_u is true
-            indices_h_J_max[k] = 1:0 # empty range
+            indices_h_J_max[k] = nothing
         else
             indices_h_J_max[k] = current_h_J_max:current_h_J_max
         end
         current_h_J_max += 1
     end
     return indices_h_dynamics_x, indices_h_dynamics_y, indices_h_scenario, indices_h_u, indices_h_J_max
-end
-
-# This function expands the local pattern of the Jacobian of a constraint with respect to a single scenario (i.e., the Jacobian with respect to z_scenario) to the global index space (i.e., the Jacobian of the constraints for all scenarios with respect to z).
-# The corresponding indices of nonzero elements are added to the sparsity_global_Jacobian_rows and sparsity_global_Jacobian_columns vectors.
-# The input indices_h_global[k] contains the indices of the constraint corresponding to scenario k in the global constraint vector h(z).
-# The function returns the the ranges of the constraint for each scenario in the vector containing the non-zero entries of the global Jacobian.
-function expand_local_Jacobian_sparsity_pattern!(sparsity_global_Jacobian_rows::AbstractVector{<:Integer}, sparsity_global_Jacobian_columns::AbstractVector{<:Integer}, sparsity_local_Jacobian_rows::Vector{Int}, sparsity_local_Jacobian_columns::Vector{Int}, indices_h_global::Vector{UnitRange{Int}}, indices_U::UnitRange{Int}, indices_X::Vector{UnitRange{Int}}, indices_Y::Vector{UnitRange{Int}}, index_J_max::UnitRange{Int}, n_u::Int, n_x::Int, n_y::Int, H::Int, K::Int)
-    nzvals_Jacobian_ranges = Vector{UnitRange{Int}}(undef, K)
-    for k in 1:K
-        row_offset = first(indices_h_global[k]) - 1 # offset of the first row of the constraint in the global constraint vector h(z)
-        column_offset_X = first(indices_X[k]) - 1 # offset of the first column of the state x_{1:H}^{[k]} of scenario k in the global variable vector z
-        column_offset_Y = first(indices_Y[k]) - 1 # offset of the first column of the output y_{1:H}^{[k]} of scenario k in the global variable vector z
-        start = length(sparsity_global_Jacobian_rows) + 1 # start index of the non-zero entries of the Jacobian of scenario k in the vector containing the non-zero entries of the global Jacobian
-        for (r, c) in zip(sparsity_local_Jacobian_rows, sparsity_local_Jacobian_columns)
-            global_row = row_offset + r
-            if c <= n_u * H
-                # Entry belongs to the input block.
-                global_column = indices_U[c]
-            elseif c <= n_u * H + n_x * H
-                # Entry belongs to the state block.
-                local_indices_X = c - n_u * H
-                global_column = column_offset_X + local_indices_X
-            elseif c <= n_u * H + n_x * H + n_y * H
-                # Entry belongs to the output block.
-                local_indices_Y = c - n_u * H - n_x * H
-                global_column = column_offset_Y + local_indices_Y
-            else
-                # Entry belongs to the J_max constraint.
-                global_column = first(index_J_max)
-            end
-            # Add the global row and column indices.
-            push!(sparsity_global_Jacobian_rows, global_row)
-            push!(sparsity_global_Jacobian_columns, global_column)
-        end
-        # Get the range of non-zero entries of the Jacobian for scenario k in the vector containing the non-zero entries of the global Jacobian.
-        stop = length(sparsity_global_Jacobian_rows)
-        nzvals_Jacobian_ranges[k] = start:stop
-    end
-    return nzvals_Jacobian_ranges, sparsity_global_Jacobian_rows, sparsity_global_Jacobian_columns
 end

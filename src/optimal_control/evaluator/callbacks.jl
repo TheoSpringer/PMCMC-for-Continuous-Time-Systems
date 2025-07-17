@@ -89,7 +89,7 @@ end
 
 # The following function returns the sparsity pattern of the Jacobian of the constraints.
 function MOI.jacobian_structure(e::PMCMC_OCP_Evaluator)
-    return e.Jac_pattern_h
+    return e.Jacobian_pattern_h
 end
 
 # The following function evaluates the Jacobian of the constraints.
