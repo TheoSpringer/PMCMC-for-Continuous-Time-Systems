@@ -144,7 +144,7 @@ function solve_PMCMC_OCP(PMCMC_samples::Vector{PMCMC_sample}, f_theta::Function,
     model = MOI.Utilities.UniversalFallback(MOI.Utilities.Model{Float64}())
 
     # Add decision variables and bounds.
-    z_indices = Vector{MOI.VariableIndex}(undef, evaluator.n_z)
+    z_indices = Vector{MOI.VariableIndex}(undef, evaluator.dimensions.n_z)
 
     for (i, set) in enumerate(evaluator.z_sets)
         z_indices[i] = MOI.add_variable(model)

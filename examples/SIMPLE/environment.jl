@@ -121,8 +121,8 @@ A constant high CO₂ concentration of 700 ppm is assumed reducing the number of
 - state vector at the next time step
 """
 function f_theta(theta::AbstractVector{<:Number},
-    x::AbstractVecOrMat{<:Number},
-    u::AbstractVecOrMat{<:Number})
+    x::Union{AbstractVecOrMat{<:Number},AbstractVecOrMat{<:JuMP.AbstractJuMPScalar}},
+    u::Union{AbstractVecOrMat{<:Number},AbstractVecOrMat{<:JuMP.AbstractJuMPScalar}})
 
     parameters = SIMPLE_parameters(theta[1], theta[2], 6.0, 26.0, 1.00 * 1e-3, 100.0, 5.0, 32.0, 45.0, 0.07, 2.5, 0.95, 0.68)
 
@@ -144,9 +144,10 @@ function f_theta(theta::AbstractVector{<:Number},
     return x_next
 end
 
+#=
 function f_theta(theta::AbstractVector{<:AbstractFloat},
-    x::Union{AbstractVector{<:JuMP.AbstractJuMPScalar},AbstractMatrix{<:JuMP.AbstractJuMPScalar}},
-    u::Union{AbstractVector{<:JuMP.AbstractJuMPScalar},AbstractMatrix{<:JuMP.AbstractJuMPScalar}})
+    x::AbstractVecOrMat{<:JuMP.AbstractJuMPScalar},
+    u::AbstractVecOrMat{<:JuMP.AbstractJuMPScalar})
 
     parameters = SIMPLE_parameters(theta[1], theta[2], 6.0, 26.0, 1.00 * 1e-3, 100.0, 5.0, 32.0, 45.0, 0.07, 2.5, 0.95, 0.68)
 
@@ -167,3 +168,4 @@ function f_theta(theta::AbstractVector{<:AbstractFloat},
 
     return x_next
 end
+=#
