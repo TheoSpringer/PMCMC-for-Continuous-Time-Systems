@@ -58,7 +58,7 @@ sample_v_theta(theta, N) = rand(MvNormal(zeros(n_x), Q), N) # sample process noi
 const C = [1.0 0 0; 0 1 0]
 g_theta(theta, x, u) = C * x # observation function
 
-# Zero-mean Gaussian measurement noise with known variance R - normalizing factors are ommited as they cancel out in the acceptance ratio.
+# Zero-mean Gaussian measurement noise with known variance R - normalizing factors are omitted as they cancel out in the acceptance ratio.
 R = Diagonal([0.1^2, 1^2]) # variance of zero-mean Gaussian measurement noise
 sample_w_theta(theta, N) = rand(MvNormal(zeros(n_y), R), N) # sample measurement noise
 log_pdf_w_theta(theta, w) = -0.5 * sum(w .* (R \ w), dims=1) # log pdf of measurement noise, scaling 
@@ -74,7 +74,7 @@ theta_var = [
     225.0    # Ia
 ]
 
-# Log pdf of prior - normalizing factors are ommited as they cancel out in the acceptance ratio.
+# Log pdf of prior - normalizing factors are omitted as they cancel out in the acceptance ratio.
 theta_cov = Diagonal(theta_var) # covariance matrix of prior
 log_pdf_theta(theta) = -0.5 * sum((theta - theta_mean) .* (theta_cov \ (theta - theta_mean)), dims=1)
 
@@ -151,7 +151,7 @@ PMMH_samples_pre_solve = PMMH_samples[K+1:K+K_pre_solve]
 
 # Revenue from selling the crops.
 # The price for the crop is set well above current prices as vertical farming is not yet economically competitive.
-price_crop = 10000 # selling price of crop in €/kg
+price_crop = 1000 # selling price of crop in €/kg
 HI = 0.68 # harvest index (proportion of total biomass that is harvestable)
 revenue(mB) = price_crop * HI * mB # revenue as a function of biomass in €/m²
 
@@ -193,7 +193,7 @@ K_warmup = ceil(Int, K_pre_solve / 4) # number of samples used to warmup the ini
 
 # IPOPT options.
 # See https://coin-or.github.io/Ipopt/OPTIONS.html for more details.
-Ipopt_options = Dict("max_iter" => 1000, "tol" => 1e-6, "acceptable_tol" => 1e-4, "linear_solver" => "mumps", "hessian_approximation" => "exact", "print_level" => 5, "ma57_automatic_scaling" => "yes", "nlp_scaling_method" => "gradient-based")
+Ipopt_options = Dict("max_iter" => 1000, "tol" => 1e-6, "acceptable_tol" => 1e-4, "linear_solver" => "mumps", "hessian_approximation" => "exact", "print_level" => 5, "derivative_test" => "second-order", "derivative_test_tol" => 1e-4, "derivative_test_print_all" => "no")
 if hsl_available
     Ipopt_options["hsllib"] = HSL_jll.libhsl_path
     Ipopt_options["linear_solver"] = "ma57"

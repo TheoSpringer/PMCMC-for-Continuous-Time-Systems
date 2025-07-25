@@ -45,6 +45,8 @@
 #       x_2(t=1)^[k]; 
 #       ...; 
 #       x_{n_x}(t=1)^[k];
+#       ...;
+#       x_{n_x}(t=H)^[k];
 #       y_1(t=1)^[k]; 
 #       y_2(t=1)^[k]; 
 #       ...; 
@@ -75,7 +77,7 @@
 #       ]
 
 # This function returns the index ranges for the control inputs, the states of scenarios 1:K, the outputs of scenarios 1:K, and the maximum cost J_max inside the flat decision vector z.
-function z_indices(dimensions::OCPDimensions)
+function z_indices(options::OCPOptions, dimensions::OCPDimensions)
     # Indices for the inputs.
     indices_U = 1:(dimensions.n_u*dimensions.H)
 
@@ -94,7 +96,7 @@ function z_indices(dimensions::OCPDimensions)
     end
 
     # Index for the maximum cost J_max (optional).
-    if dimensions.J_u
+    if options.J_u
         # Cost is J(u) and there is no J_max.
         index_J_max = nothing
     else
@@ -106,7 +108,7 @@ function z_indices(dimensions::OCPDimensions)
 end
 
 # This function returns the index ranges for the dynamic constraints for the states, the dynamic constraints for the outputs, the scenario constraints h_scenario, the input constraints h_u, and (optionally) the epigraph constraints, inside the flat constraint vector h(z).
-function h_indices(dimensions::OCPDimensions)
+function h_indices(options::OCPOptions, dimensions::OCPDimensions)
     # Indices for the dynamic constraints for the states (e.g., f^[k=1](x_1^[k=1],u_1) + w_1^[k=1] - x_2^[k=1] == 0)
     indices_h_dynamics_x = Vector{UnitRange{Int}}(undef, dimensions.K)
     first_dynamic_constraint_x = 1
@@ -137,7 +139,7 @@ function h_indices(dimensions::OCPDimensions)
     indices_h_J_max = Vector{UnitRange{Int}}(undef, dimensions.K)
     current_h_J_max = first_h_u + dimensions.n_h_u
     for k in 1:dimensions.K
-        if dimensions.J_u
+        if options.J_u
             # Pass empty range if J_u is true
             indices_h_J_max[k] = nothing
         else
@@ -148,21 +150,21 @@ function h_indices(dimensions::OCPDimensions)
     return indices_h_dynamics_x, indices_h_dynamics_y, indices_h_scenario, indices_h_u, indices_h_J_max
 end
 
-function get_indices(dimensions::OCPDimensions)
-    indices_U, indices_X, indices_Y, index_J_max = z_indices(dimensions)
-    indices_h_dynamics_x, indices_h_dynamics_y, indices_h_scenario, indices_h_u, indices_h_J_max = h_indices(dimensions)
+function get_indices(options::OCPOptions, dimensions::OCPDimensions)
+    indices_U, indices_X, indices_Y, index_J_max = z_indices(options, dimensions)
+    indices_h_dynamics_x, indices_h_dynamics_y, indices_h_scenario, indices_h_u, indices_h_J_max = h_indices(options, dimensions)
     return OCPIndices(indices_U, indices_X, indices_Y, index_J_max, indices_h_dynamics_x, indices_h_dynamics_y, indices_h_scenario, indices_h_u, indices_h_J_max)
 end
 
 # This function returns the flat decision vector z corresponding to the inputs U, states X, outputs Y, and (optionally) J_max.
-function pack_z(U::AbstractMatrix, X::AbstractArray, Y::AbstractArray, indices::OCPIndices, dimensions::OCPDimensions; J_max::Union{Nothing,AbstractFloat}=nothing)
+function pack_z(U::AbstractMatrix, X::AbstractArray, Y::AbstractArray, options::OCPOptions, dimensions::OCPDimensions, indices::OCPIndices; J_max::Union{Nothing,AbstractFloat}=nothing)
     z = Vector{eltype(U)}(undef, dimensions.n_z)
     z[indices.U] .= vec(U)
     for k in 1:dimensions.K
         z[indices.X[k]] .= vec(X[:, :, k])
         z[indices.Y[k]] .= vec(Y[:, :, k])
     end
-    if !dimensions.J_u
+    if !options.J_u
         if J_max === nothing
             z[indices.J_max] .= NaN
         else
@@ -173,7 +175,7 @@ function pack_z(U::AbstractMatrix, X::AbstractArray, Y::AbstractArray, indices::
 end
 
 # This function returns the inputs U, states X, outputs Y, and (optionally) J_max from the flat decision vector z.
-function unpack_z(z::AbstractVector, indices::OCPIndices, dimensions::OCPDimensions)
+function unpack_z(z::AbstractVector, options::OCPOptions, dimensions::OCPDimensions, indices::OCPIndices)
     U = reshape((z[indices.U]), dimensions.n_u, dimensions.H)
     X = Array{eltype(z)}(undef, dimensions.n_x, dimensions.H, dimensions.K)
     Y = Array{eltype(z)}(undef, dimensions.n_y, dimensions.H, dimensions.K)
@@ -181,7 +183,7 @@ function unpack_z(z::AbstractVector, indices::OCPIndices, dimensions::OCPDimensi
         X[:, :, k] .= reshape((z[indices.X[k]]), dimensions.n_x, dimensions.H)
         Y[:, :, k] .= reshape((z[indices.Y[k]]), dimensions.n_y, dimensions.H)
     end
-    if !dimensions.J_u
+    if !options.J_u
         J_max = z[indices.J_max]
         return U, X, Y, J_max
     else
@@ -190,11 +192,11 @@ function unpack_z(z::AbstractVector, indices::OCPIndices, dimensions::OCPDimensi
 end
 
 # This function returns the inputs U, states X_k for scenario k, outputs Y_k for scenario k, and (optionally) J_max from the flat decision vector z.
-function unpack_z_k(z::AbstractVector, k::Int, indices::OCPIndices, dimensions::OCPDimensions)
+function unpack_z_k(z::AbstractVector, k::Int, options::OCPOptions, dimensions::OCPDimensions, indices::OCPIndices)
     U = @views reshape(z[indices.U], dimensions.n_u, dimensions.H)
     X_k = @views reshape(z[indices.X[k]], dimensions.n_x, dimensions.H)
     Y_k = @views reshape(z[indices.Y[k]], dimensions.n_y, dimensions.H)
-    if !dimensions.J_u
+    if !options.J_u
         J_max = z[indices.J_max]
         return U, X_k, Y_k, J_max
     else
@@ -209,11 +211,11 @@ end
 
 # Returns the vector z_scenario for scenario k from the flat decision vector z.
 # The vector z_scenario contains the inputs U, states X_k, outputs Y_k, and (optionally) J_max for scenario k.
-function view_z_scenario(z::AbstractVector, k::Int, indices::OCPIndices, dimensions::OCPDimensions)
+function view_z_scenario(z::AbstractVector, k::Int, options::OCPOptions, indices::OCPIndices)
     U_vec = @views z[indices.U]
     X_k_vec = @views z[indices.X[k]]
     Y_k_vec = @views z[indices.Y[k]]
-    if !dimensions.J_u
+    if !options.J_u
         J_max = @views z[indices.J_max]
         z_scenario = [U_vec; X_k_vec; Y_k_vec; J_max]
     else
@@ -223,11 +225,11 @@ function view_z_scenario(z::AbstractVector, k::Int, indices::OCPIndices, dimensi
 end
 
 # This function unpacks the inputs U, states X_k, outputs Y_k, and (optionally) J_max from the flat decision vector z_scenario.
-function unpack_z_scenario(z_scenario::AbstractVector, dimensions::OCPDimensions)
+function unpack_z_scenario(z_scenario::AbstractVector, options::OCPOptions, dimensions::OCPDimensions)
     U = @views reshape(z_scenario[1:dimensions.n_u*dimensions.H], dimensions.n_u, dimensions.H)
     X_k = @views reshape(z_scenario[dimensions.n_u*dimensions.H+1:dimensions.n_u*dimensions.H+dimensions.n_x*dimensions.H], dimensions.n_x, dimensions.H)
     Y_k = @views reshape(z_scenario[dimensions.n_u*dimensions.H+dimensions.n_x*dimensions.H+1:dimensions.n_u*dimensions.H+dimensions.n_x*dimensions.H+dimensions.n_y*dimensions.H], dimensions.n_y, dimensions.H)
-    if !dimensions.J_u
+    if !options.J_u
         J_max = @views z_scenario[dimensions.n_u*dimensions.H+dimensions.n_x*dimensions.H+dimensions.n_y*dimensions.H+1]
         return U, X_k, Y_k, J_max
     else
@@ -237,7 +239,7 @@ end
 
 # The following function translates indices with respect to the vector z_scenario to indices with respect to the global decision vector z.
 # The inputs offset_X and offset_Y are the offsets of the first entries of the state and output blocks of the considered scenario in the global decision vector z.
-function translate_local_index_to_global(local_index::Int, offset_X::Int, offset_Y::Int, dimensions::OCPDimensions, indices::OCPIndices)
+function translate_local_index_to_global(local_index::Int, offset_X::Int, offset_Y::Int, options::OCPOptions, dimensions::OCPDimensions, indices::OCPIndices)
     if local_index <= dimensions.n_u * dimensions.H
         # Entry belongs to the input block.
         global_index = indices.U[local_index]
@@ -249,9 +251,12 @@ function translate_local_index_to_global(local_index::Int, offset_X::Int, offset
         # Entry belongs to the output block.
         local_indices_Y = local_index - dimensions.n_u * dimensions.H - dimensions.n_x * dimensions.H
         global_index = offset_Y + local_indices_Y
-    else
+    elseif local_index <= dimensions.n_u * dimensions.H + dimensions.n_x * dimensions.H + dimensions.n_y * dimensions.H + 1 && !options.J_u
         # Entry belongs to the J_max constraint.
         global_index = first(indices.J_max)
+    else
+        @error "Invalid local index: $local_index"
+        global_index = nothing
     end
     return global_index
 end

@@ -5,6 +5,9 @@
 
 # Evaluator struct.
 struct PMCMC_OCP_Evaluator <: MOI.AbstractNLPEvaluator
+    # Options
+    options::OCPOptions
+
     # Dimensions.
     dimensions::OCPDimensions
 
@@ -13,9 +16,6 @@ struct PMCMC_OCP_Evaluator <: MOI.AbstractNLPEvaluator
 
     # Data.
     data::OCPData
-
-    # Functions.
-    helpers::OCPFunctions
 
     # Bounds for the decision vector z.
     z_sets::Vector{MOI.AbstractScalarSet}
@@ -27,7 +27,6 @@ struct PMCMC_OCP_Evaluator <: MOI.AbstractNLPEvaluator
     Jacobian_pattern_h::Vector{Tuple{Int,Int}}
 
     # Global sparsity pattern of the Hessian of the Lagrangian.
-    Hessian_build::Bool
     Hessian_pattern_L::Union{Vector{Tuple{Int,Int}},Nothing}
 
     # Ranges of the constraints in the vector containing the non-zero entries of the global Jacobian.
@@ -38,13 +37,11 @@ struct PMCMC_OCP_Evaluator <: MOI.AbstractNLPEvaluator
 
     # Cache for the automatic differentiation.
     thread_cache::Vector{ThreadCache}
-    cache_Jacobian_h_u::ADCache
-    cache_Hessian_L_u::Union{ADCache,Nothing}
-    cache_Hessian_J_u::Union{ADCache,Nothing}
+    global_cache::GlobalCache
 end
 
 # Constructor for PMCMC_OCP_Evaluator.
-function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float64}, W::Array{Float64}, X_t::Array{Float64}, f_theta::Function, g_theta::Function, J::Function, J_u::Bool, h_scenario::Function, h_u::Function, n_u::Int, n_x::Int, n_y::Int, H::Int; build_Hessian::Bool=true)
+function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float64}, W::Array{Float64}, X_t::Array{Float64}, f_theta::Function, g_theta::Function, J::Function, J_u::Bool, h_scenario::Function, h_u::Function, n_u::Int, n_x::Int, n_y::Int, H::Int; build_Hessian::Bool=true, deduplicate_Hessian::Bool=false)
     # Check if multithreading is enabled.
     n_threads = Threads.nthreads()
 
@@ -88,19 +85,45 @@ function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float
         n_h = K * n_x * (H - 1) + K * n_y * H + K * n_h_scenario + n_h_u
     end
 
+    # Create the options struct.
+    options = OCPOptions(build_Hessian, deduplicate_Hessian, J_u)
+
     # Create the dimensions struct.
-    dimensions = OCPDimensions(n_u, n_x, n_y, K, H, n_z, n_z_scenario, n_h_scenario, n_h_u, J_u, n_h)
+    dimensions = OCPDimensions(n_u, n_x, n_y, K, H, n_z, n_z_scenario, n_h_scenario, n_h_u, n_h)
 
     # Get the index ranges in the flat decision vector z corresponding to the inputs U, states X, outputs Y, and (optionally) J_max 
     # and the index ranges in the flat constraint vector h(z) corresponding to the dynamic constraints for the states,
     # the dynamic constraints for the outputs, scenario constraints h_scenario, the input constraints h_u, and (optionally) the epigraph constraints.
-    indices = get_indices(dimensions)
+    indices = get_indices(options, dimensions)
 
     # Create the data struct.
     data = OCPData(PMCMC_samples, V, W, X_t)
 
-    # Build the helper functions that evaluate the constraints and the local Lagrangian terms.
-    helpers = build_helpers(f_theta, g_theta, h_scenario, h_u, J, dimensions; build_Hessian)
+    # Create thread and global context.
+    # Lagrange multipliers
+    lambda_h_dynamics_x = ones(n_x * (H - 1))
+    lambda_h_dynamics_y = ones(n_y * H)
+    lambda_h_scenario = ones(n_h_scenario)
+    if !J_u
+        lambda_h_J_max = ones(1)
+    else
+        lambda_h_J_max = nothing
+    end
+
+    thread_context = Vector{ThreadContext}(undef, n_threads)
+    for i in 1:n_threads
+        thread_context[i] = ThreadContext(data.PMCMC_samples[1].theta, data.V[:, :, 1], data.W[:, :, 1], lambda_h_dynamics_x, lambda_h_dynamics_y, lambda_h_scenario, lambda_h_J_max)
+    end
+
+    lambda_h_u = ones(n_h_u)
+    global_context = GlobalContext(lambda_h_u)
+
+    # Build the helper functions that evaluate the scenario dependent constraints and their Lagrangians.
+    thread_helpers = Vector{ThreadHelpers}(undef, n_threads)
+    for i in 1:n_threads
+        thread_helpers[i] = build_thread_helpers(f_theta, g_theta, h_scenario, J, options, dimensions, thread_context[i])
+    end
+    global_helpers = build_global_helpers(h_u, J, options, dimensions, global_context)
 
     # Create bounds for the flat decision vector z.
     z_sets = Vector{MOI.AbstractScalarSet}(undef, dimensions.n_z)
@@ -120,7 +143,7 @@ function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float
             z_sets[i] = MOI.Interval(-Inf, Inf)
         end
     end
-    if !dimensions.J_u
+    if !options.J_u
         for i in indices.J_max
             z_sets[i] = MOI.Interval(-Inf, Inf)
         end
@@ -145,7 +168,7 @@ function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float
         end
 
         # Epigraph (inequality) constraints.
-        if !dimensions.J_u
+        if !options.J_u
             for i in indices.h_J_max[k]
                 h_bounds[i] = MOI.NLPBoundsPair(-Inf, 0.0)
             end
@@ -157,8 +180,8 @@ function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float
     end
 
     # Initialize sparsity pattern for the constraint Jacobian.
-    sparsity_Jacobian_rows = Int32[] # global row indices of non-zero entries
-    sparsity_Jacobian_columns = Int32[] # global column indices of non-zero entries
+    sparsity_Jacobian_rows = Int[] # global row indices of non-zero entries
+    sparsity_Jacobian_columns = Int[] # global column indices of non-zero entries
 
     # Compute the sparsity pattern for the Jacobian of the dynamic constraints.
     # The following vectors determine in which region the sparsity pattern is evaluated.
@@ -167,20 +190,18 @@ function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float
     h_dynamics_x_loc = zeros(dimensions.n_x * (dimensions.H - 1))
     h_dynamics_y_loc = zeros(dimensions.n_y * dimensions.H)
 
-    # Compute the sparsity pattern of the Jacobian of the dynamic constraints for a single scenario, replicate it for all scenarios, and build per-thread cache for the automatic differentiation.
-    h_dynamics_x_example! = (h_dyn_x, z_scenario) -> helpers.h_dynamics_x!(h_dyn_x, z_scenario, data.PMCMC_samples[1].theta, data.V[:, :, 1])
-    h_dynamics_y_example! = (h_dyn_y, z_scenario) -> helpers.h_dynamics_y!(h_dyn_y, z_scenario, data.PMCMC_samples[1].theta, data.W[:, :, 1])
-    nzrange_h_dynamics_x, cache_h_dynamics_x = setup_sparse_Jacobian_cache!(sparsity_Jacobian_rows, sparsity_Jacobian_columns, h_dynamics_x_example!, h_dynamics_x_loc, z_scenario_loc, indices.h_dynamics_x, indices, dimensions)
-    nzrange_h_dynamics_y, cache_h_dynamics_y = setup_sparse_Jacobian_cache!(sparsity_Jacobian_rows, sparsity_Jacobian_columns, h_dynamics_y_example!, h_dynamics_y_loc, z_scenario_loc, indices.h_dynamics_y, indices, dimensions)
+    # Compute the sparsity pattern of the Jacobian of the dynamic constraints for a single scenario and replicate it for all scenarios.
+    nzrange_h_dynamics_x, colors_h_dynamics_x, sparsity_h_dynamics_x = register_local_Jacobian_sparsity!(sparsity_Jacobian_rows, sparsity_Jacobian_columns, thread_helpers[1].h_dynamics_x!, h_dynamics_x_loc, z_scenario_loc, indices.h_dynamics_x, options, dimensions, indices)
+    nzrange_h_dynamics_y, colors_h_dynamics_y, sparsity_h_dynamics_y = register_local_Jacobian_sparsity!(sparsity_Jacobian_rows, sparsity_Jacobian_columns, thread_helpers[1].h_dynamics_y!, h_dynamics_y_loc, z_scenario_loc, indices.h_dynamics_y, options, dimensions, indices)
 
-    # Compute the sparsity pattern of the Jacobian of the scenario constraints for a single scenario, replicate it for all scenarios, and build per-thread cache for the automatic differentiation.
+    # Compute the sparsity pattern of the Jacobian of the scenario constraints for a single scenario and replicate it for all scenarios.
     h_scenario_loc = zeros(dimensions.n_h_scenario)
-    nzrange_h_scenario, cache_h_scenario = setup_sparse_Jacobian_cache!(sparsity_Jacobian_rows, sparsity_Jacobian_columns, helpers.h_scenario!, h_scenario_loc, z_scenario_loc, indices.h_scenario, indices, dimensions)
+    nzrange_h_scenario, colors_h_scenario, sparsity_h_scenario = register_local_Jacobian_sparsity!(sparsity_Jacobian_rows, sparsity_Jacobian_columns, thread_helpers[1].h_scenario!, h_scenario_loc, z_scenario_loc, indices.h_scenario, options, dimensions, indices)
 
     # Evaluate the sparsity pattern of h_u.
     u_loc = zeros(dimensions.n_u * dimensions.H)
     h_u_loc = zeros(dimensions.n_h_u)
-    Jac_pattern_h_u, colors_h_u, rows_h_u_local, columns_h_u_local = compute_Jacobian_sparsity(helpers.h_u!, u_loc, h_u_loc)
+    Jac_pattern_h_u, colors_h_u, rows_h_u_local, columns_h_u_local = compute_Jacobian_sparsity(global_helpers.h_u!, u_loc, h_u_loc)
 
     # Add the non-zero entries of the sparsity pattern of h_u to the global sparsity pattern.
     row_offset = first(indices.h_u) - 1
@@ -193,9 +214,9 @@ function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float
     nzrange_h_u = start:stop
 
     # Build cache for the automatic differentiation of h_u.
-    cache_Jacobian_h_u = ADCache(SparseDiffTools.ForwardColorJacCache(helpers.h_u!, u_loc, nothing; dx=h_u_loc, colorvec=colors_h_u, sparsity=Jac_pattern_h_u), Float64.(Jac_pattern_h_u))
+    cache_Jacobian_h_u = ADCache(SparseDiffTools.ForwardColorJacCache(global_helpers.h_u!, u_loc, nothing; dx=h_u_loc, colorvec=colors_h_u, sparsity=Jac_pattern_h_u), Float64.(Jac_pattern_h_u))
 
-    if !dimensions.J_u
+    if !options.J_u
         # Epigraph constraints are used.
         # Compute the sparsity pattern of the Jacobian of the epigraph constraint for a single scenario, replicate it for all scenarios, and build per-thread cache for the automatic differentiation.
         # The epigraph constraint for one scenario is scalar, so its Jacobian is a single row (i.e., the gradient).  With only one row, matrix colouring offers no benefit: we could build the sparsity pattern with
@@ -203,20 +224,18 @@ function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float
         # Instead, we deliberately reuse the same Jacobian‑building path we use for the larger constraint blocks.  
         # This keeps the implementation uniform and the callback logic simple, at the cost of a negligible amount of extra work for this one row.
         h_J_max_loc = zeros(1)
-        nzrange_h_J_max, cache_h_J_max = setup_sparse_Jacobian_cache!(sparsity_Jacobian_rows, sparsity_Jacobian_columns, helpers.h_J_max!, h_J_max_loc, z_scenario_loc, indices.h_J_max, indices, dimensions)
-
-        # Function eval_J_u is empty if epigraph constraints are used.
-        eval_J_u = nothing
+        nzrange_h_J_max, colors_h_J_max, sparsity_h_J_max = register_local_Jacobian_sparsity!(sparsity_Jacobian_rows, sparsity_Jacobian_columns, thread_helpers[1].h_J_max!, h_J_max_loc, z_scenario_loc, indices.h_J_max, options, dimensions, indices)
     else
         # J_u is used as cost function instead of epigraph notation.
         nzrange_h_J_max = nothing
-        cache_h_J_max = nothing
+        colors_h_J_max = nothing
+        sparsity_h_J_max = nothing
+    end
 
-        # The following function evaluates the cost function J(U) for the input vector U_vec (U_vec = vec(U)).
-        function eval_J_u(U_vec::AbstractVector)
-            U = @views reshape(U_vec, dimensions.n_u, dimensions.H)
-            return J(U)
-        end
+    # Convert the sparsity pattern represented by two vectors containing the row and column indices to a vector of tuples.
+    Jacobian_pattern_h = Vector{Tuple{Int,Int}}(undef, length(sparsity_Jacobian_rows))
+    for i in eachindex(sparsity_Jacobian_rows)
+        Jacobian_pattern_h[i] = (sparsity_Jacobian_rows[i], sparsity_Jacobian_columns[i])
     end
 
     # Create struct that contains the ranges corresponding to specific constraints in the vector containing the non-zero entries of the global Jacobian.
@@ -233,29 +252,17 @@ function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float
         # This keeps the threaded implementation simple and still exploits scenario–level parallelism efficiently.
 
         # Initialize sparsity pattern for the Hessian of the Lagrangian.
-        sparsity_Hessian_Lagrangian_rows = Int32[] # global row indices of non-zero entries
-        sparsity_Hessian_Lagrangian_columns = Int32[] # global column indices of non-zero entries
+        sparsity_Hessian_Lagrangian_rows = Int[] # global row indices of non-zero entries
+        sparsity_Hessian_Lagrangian_columns = Int[] # global column indices of non-zero entries
 
-        # Compute the Hessian of the local Lagrangian of the dynamic constraints.
-        lambda_h_dynamics_x = ones(dimensions.n_x * (dimensions.H - 1))
-        lambda_h_dynamics_y = ones(dimensions.n_y * dimensions.H)
-
-        # Compute the sparsity pattern of the Hessian of the local Lagrangian containing the dynamic constraints for a single scenario, replicate it for all scenarios, and build per-thread cache for the automatic differentiation.
-        L_dynamics_x_example = (z_scenario) -> helpers.lagrangian_dynamics_x(lambda_h_dynamics_x, z_scenario, data.PMCMC_samples[1].theta, data.V[:, :, 1])
-        L_dynamics_y_example = (z_scenario) -> helpers.lagrangian_dynamics_y(lambda_h_dynamics_y, z_scenario, data.PMCMC_samples[1].theta, data.W[:, :, 1])
-
-        nzrange_Hessian_L_dynamics_x, cache_Hessian_L_dynamics_x = setup_sparse_Hessian_cache!(sparsity_Hessian_Lagrangian_rows, sparsity_Hessian_Lagrangian_columns, L_dynamics_x_example, z_scenario_loc, indices, dimensions)
-        nzrange_Hessian_L_dynamics_y, cache_Hessian_L_dynamics_y = setup_sparse_Hessian_cache!(sparsity_Hessian_Lagrangian_rows, sparsity_Hessian_Lagrangian_columns, L_dynamics_y_example, z_scenario_loc, indices, dimensions)
+        nzrange_Hessian_L_dynamics_x, colors_Hessian_L_dynamics_x, sparsity_Hessian_L_dynamics_x = register_local_Hessian_sparsity!(sparsity_Hessian_Lagrangian_rows, sparsity_Hessian_Lagrangian_columns, thread_helpers[1].lagrangian_dynamics_x, z_scenario_loc, options, dimensions, indices)
+        nzrange_Hessian_L_dynamics_y, colors_Hessian_L_dynamics_y, sparsity_Hessian_L_dynamics_y = register_local_Hessian_sparsity!(sparsity_Hessian_Lagrangian_rows, sparsity_Hessian_Lagrangian_columns, thread_helpers[1].lagrangian_dynamics_y, z_scenario_loc, options, dimensions, indices)
 
         # Compute the sparsity pattern of the Hessian of the local Lagrangian containing the scenario constraints for a single scenario, replicate it for all scenarios, and build per-thread cache for the automatic differentiation.
-        lambda_h_scenario = ones(dimensions.n_h_scenario)
-        L_scenario_example = (z_scenario) -> helpers.lagrangian_scenario(lambda_h_scenario, z_scenario)
-        nzrange_Hessian_L_scenario, cache_Hessian_L_scenario = setup_sparse_Hessian_cache!(sparsity_Hessian_Lagrangian_rows, sparsity_Hessian_Lagrangian_columns, L_scenario_example, z_scenario_loc, indices, dimensions)
+        nzrange_Hessian_L_scenario, colors_Hessian_L_scenario, sparsity_Hessian_L_scenario = register_local_Hessian_sparsity!(sparsity_Hessian_Lagrangian_rows, sparsity_Hessian_Lagrangian_columns, thread_helpers[1].lagrangian_scenario, z_scenario_loc, options, dimensions, indices)
 
         # Evaluate the sparsity pattern of the Hessian of the local Lagrangian containing the input constraints h_u.
-        lambda_h_u = ones(dimensions.n_h_u)
-        lagrangian_u_example = (U_vec) -> helpers.lagrangian_u(lambda_h_u, U_vec)
-        sparsity_Hessian_L_u, colors_Hessian_L_u, rows_Hessian_L_u, columns_Hessian_L_u = compute_Hessian_sparsity(lagrangian_u_example, u_loc)
+        sparsity_Hessian_L_u, colors_Hessian_L_u, rows_Hessian_L_u, columns_Hessian_L_u = compute_Hessian_sparsity(global_helpers.lagrangian_u, u_loc)
 
         # Add the non-zero entries of the sparsity pattern of the Hessian of the local Lagrangian to the global sparsity pattern.
         start = length(sparsity_Hessian_Lagrangian_rows) + 1
@@ -267,20 +274,18 @@ function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float
         nzrange_Hessian_L_u = start:stop
 
         # Build cache for the automatic differentiation of L_u.
-        cache_Hessian_L_u = ADCache(SparseDiffTools.ForwardColorHesCache(lagrangian_u_example, u_loc, colors_Hessian_L_u, sparsity_Hessian_L_u), Float64.(sparsity_Hessian_L_u))
+        cache_Hessian_L_u = ADCache(SparseDiffTools.ForwardAutoColorHesCache(global_helpers.lagrangian_u, u_loc, colors_Hessian_L_u, sparsity_Hessian_L_u), Float64.(sparsity_Hessian_L_u))
 
-        if !dimensions.J_u
+        if !options.J_u
             # Compute the sparsity pattern of the Hessian of the local Lagrangian containing the epigraph constraints for a single scenario, replicate it for all scenarios, and build per-thread cache for the automatic differentiation.
-            lambda_h_J_max = ones(1)
-            L_J_max_example = (z_scenario) -> helpers.lagrangian_J_max(lambda_h_J_max, z_scenario)
-            nzrange_Hessian_L_J_max, cache_Hessian_L_J_max = setup_sparse_Hessian_cache!(sparsity_Hessian_Lagrangian_rows, sparsity_Hessian_Lagrangian_columns, L_J_max_example, z_scenario_loc, indices, dimensions)
+            nzrange_Hessian_L_J_max, colors_Hessian_L_J_max, sparsity_Hessian_L_J_max = register_local_Hessian_sparsity!(sparsity_Hessian_Lagrangian_rows, sparsity_Hessian_Lagrangian_columns, thread_helpers[1].lagrangian_J_max, z_scenario_loc, options, dimensions, indices)
 
             # Function eval_J_u is empty if epigraph constraints are used.
             nzrange_Hessian_J_u = nothing
             cache_Hessian_J_u = nothing
         else
             # Compute the Hessian of the cost function J(u).
-            Hessian_J_u_sparsity, Hessian_J_u_colors, rows_Hessian_J_u, columns_Hessian_J_u = compute_Hessian_sparsity(helpers.eval_J_u, u_loc)
+            Hessian_J_u_sparsity, Hessian_J_u_colors, rows_Hessian_J_u, columns_Hessian_J_u = compute_Hessian_sparsity(global_helpers.eval_J_u, u_loc)
 
             start = length(sparsity_Hessian_Lagrangian_rows) + 1
             for (r, c) in zip(rows_Hessian_J_u, columns_Hessian_J_u)
@@ -291,11 +296,10 @@ function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float
             nzrange_Hessian_J_u = start:stop
 
             # Build cache for the automatic differentiation of J_u.
-            cache_Hessian_J_u = ADCache(SparseDiffTools.ForwardColorHesCache(helpers.eval_J_u, u_loc, Hessian_J_u_colors, Hessian_J_u_sparsity), Float64.(sparsity_Hessian_J_u))
+            cache_Hessian_J_u = ADCache(SparseDiffTools.ForwardAutoColorHesCache(global_helpers.eval_J_u, u_loc, Hessian_J_u_colors, Hessian_J_u_sparsity), Float64.(sparsity_Hessian_J_u))
 
             # Hessian of the Lagrangian is not built for the epigraph constraints.
             nzrange_Hessian_L_J_max = nothing
-            cache_Hessian_L_J_max = nothing
         end
 
         # Convert the sparsity pattern represented by two vectors containing the row and column indices to a vector of tuples.
@@ -306,25 +310,46 @@ function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float
 
         # Create the struct that contains the ranges corresponding to specific constraints in the vector containing the non-zero entries of the global Hessian.
         nzrange_Hessian_L = SparseHessianNZRanges(nzrange_Hessian_L_dynamics_x, nzrange_Hessian_L_dynamics_y, nzrange_Hessian_L_scenario, nzrange_Hessian_L_u, nzrange_Hessian_L_J_max, nzrange_Hessian_J_u)
+
     else
         # Hessian of the Lagrangian is not built.
         Hessian_pattern_L = nothing
         nzrange_Hessian_L = nothing
-
-        cache_Hessian_L_dynamics_x = nothing
-        cache_Hessian_L_dynamics_y = nothing
-        cache_Hessian_L_scenario = nothing
-        cache_Hessian_L_J_max = nothing
-
         cache_Hessian_L_u = nothing
         cache_Hessian_J_u = nothing
     end
 
-    # Create the caches for the automatic differentiation of the constraints for each thread.
+    # Create the thread cache for the automatic differentiation of the dynamic, scenario, and epigraph constraints and their Lagrangians.
     thread_cache = Vector{ThreadCache}(undef, n_threads)
     for i in 1:n_threads
-        thread_cache[i] = ThreadCache(cache_h_dynamics_x, cache_h_dynamics_y, cache_h_scenario, cache_h_J_max, cache_Hessian_L_dynamics_x, cache_Hessian_L_dynamics_y, cache_Hessian_L_scenario, cache_Hessian_L_J_max)
+        cache_h_dynamics_x = ADCache(SparseDiffTools.ForwardColorJacCache(thread_helpers[i].h_dynamics_x!, z_scenario_loc, nothing; dx=h_dynamics_x_loc, colorvec=colors_h_dynamics_x, sparsity=sparsity_h_dynamics_x), Float64.(sparsity_h_dynamics_x))
+        cache_h_dynamics_y = ADCache(SparseDiffTools.ForwardColorJacCache(thread_helpers[i].h_dynamics_y!, z_scenario_loc, nothing; dx=h_dynamics_y_loc, colorvec=colors_h_dynamics_y, sparsity=sparsity_h_dynamics_y), Float64.(sparsity_h_dynamics_y))
+        cache_h_scenario = ADCache(SparseDiffTools.ForwardColorJacCache(thread_helpers[i].h_scenario!, z_scenario_loc, nothing; dx=h_scenario_loc, colorvec=colors_h_scenario, sparsity=sparsity_h_scenario), Float64.(sparsity_h_scenario))
+        if !options.J_u
+            cache_h_J_max = ADCache(SparseDiffTools.ForwardColorJacCache(thread_helpers[i].h_J_max!, z_scenario_loc, nothing; dx=h_J_max_loc, colorvec=colors_h_J_max, sparsity=sparsity_h_J_max), Float64.(sparsity_h_J_max))
+        else
+            cache_h_J_max = nothing
+        end
+        if build_Hessian
+            cache_Hessian_L_dynamics_x = ADCache(SparseDiffTools.ForwardAutoColorHesCache(thread_helpers[i].lagrangian_dynamics_x, z_scenario_loc, colors_Hessian_L_dynamics_x, sparsity_Hessian_L_dynamics_x), Float64.(sparsity_Hessian_L_dynamics_x))
+            cache_Hessian_L_dynamics_y = ADCache(SparseDiffTools.ForwardAutoColorHesCache(thread_helpers[i].lagrangian_dynamics_y, z_scenario_loc, colors_Hessian_L_dynamics_y, sparsity_Hessian_L_dynamics_y), Float64.(sparsity_Hessian_L_dynamics_y))
+            cache_Hessian_L_scenario = ADCache(SparseDiffTools.ForwardAutoColorHesCache(thread_helpers[i].lagrangian_scenario, z_scenario_loc, colors_Hessian_L_scenario, sparsity_Hessian_L_scenario), Float64.(sparsity_Hessian_L_scenario))
+            if !options.J_u
+                cache_Hessian_L_J_max = ADCache(SparseDiffTools.ForwardAutoColorHesCache(thread_helpers[i].lagrangian_J_max, z_scenario_loc, colors_Hessian_L_J_max, sparsity_Hessian_L_J_max), Float64.(sparsity_Hessian_L_J_max))
+            else
+                cache_Hessian_L_J_max = nothing
+            end
+        else
+            cache_Hessian_L_dynamics_x = nothing
+            cache_Hessian_L_dynamics_y = nothing
+            cache_Hessian_L_scenario = nothing
+            cache_Hessian_L_J_max = nothing
+        end
+        thread_cache[i] = ThreadCache(cache_h_dynamics_x, cache_h_dynamics_y, cache_h_scenario, cache_h_J_max, cache_Hessian_L_dynamics_x, cache_Hessian_L_dynamics_y, cache_Hessian_L_scenario, cache_Hessian_L_J_max, thread_helpers[i], thread_context[i])
     end
+
+    # Create the global cache for the automatic differentiation of the constraints.
+    global_cache = GlobalCache(cache_Jacobian_h_u, cache_Hessian_L_u, cache_Hessian_J_u, global_context, global_helpers)
 
     # Quick check to ensure the sparsity patterns are valid.
     @assert maximum(sparsity_Jacobian_rows) <= n_h
@@ -337,26 +362,17 @@ function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float
         @assert length(sparsity_Hessian_Lagrangian_rows) == length(sparsity_Hessian_Lagrangian_columns)
     end
 
-    # Convert the sparsity pattern represented by two vectors containing the row and column indices to a vector of tuples.
-    Jacobian_pattern_h = Vector{Tuple{Int,Int}}(undef, length(sparsity_Jacobian_rows))
-    for i in eachindex(sparsity_Jacobian_rows)
-        Jacobian_pattern_h[i] = (sparsity_Jacobian_rows[i], sparsity_Jacobian_columns[i])
-    end
-
     # Create the evaluator.
-    return PMCMC_OCP_Evaluator(dimensions,
+    return PMCMC_OCP_Evaluator(options,
+        dimensions,
         indices,
         data,
-        helpers,
         z_sets,
         h_bounds,
         Jacobian_pattern_h,
-        build_Hessian,
         Hessian_pattern_L,
         nzrange_Jacobian_h,
         nzrange_Hessian_L,
         thread_cache,
-        cache_Jacobian_h_u,
-        cache_Hessian_L_u,
-        cache_Hessian_J_u)
+        global_cache)
 end
