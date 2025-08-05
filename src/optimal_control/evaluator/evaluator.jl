@@ -43,11 +43,11 @@ end
 # Constructor for PMCMC_OCP_Evaluator.
 function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float64}, W::Array{Float64}, X_t::Array{Float64}, f_theta::Function, g_theta::Function, J::Function, J_u::Bool, h_scenario::Function, h_u::Function, n_u::Int, n_x::Int, n_y::Int, H::Int; build_Hessian::Bool=true, deduplicate_Hessian::Bool=false)
     # Check if multithreading is enabled.
-    n_threads = Threads.nthreads()
+    K = Threads.nthreads()
 
-    @info "Evaluator running with $n_threads Julia thread$(n_threads == 1 ? "" : "s")."
+    @info "Evaluator running with $K Julia thread$(K == 1 ? "" : "s")."
 
-    if n_threads == 1
+    if K == 1
         @warn "Multithreading is disabled (JULIA_NUM_THREADS = 1).\n" *
               "Jacobian computations and other parallel loops will run serially. " *
               "Enable multithreading for better performance."
@@ -110,17 +110,17 @@ function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float
         lambda_h_J_max = nothing
     end
 
-    thread_context = Vector{ThreadContext}(undef, n_threads)
-    for i in 1:n_threads
-        thread_context[i] = ThreadContext(data.PMCMC_samples[1].theta, data.V[:, :, 1], data.W[:, :, 1], lambda_h_dynamics_x, lambda_h_dynamics_y, lambda_h_scenario, lambda_h_J_max)
+    thread_context = Vector{ThreadContext}(undef, K)
+    for i in 1:K
+        thread_context[i] = ThreadContext(copy(data.PMCMC_samples[i].theta), copy(data.V[:, :, i]), copy(data.W[:, :, i]), copy(lambda_h_dynamics_x), copy(lambda_h_dynamics_y), copy(lambda_h_scenario), copy(lambda_h_J_max))
     end
 
     lambda_h_u = ones(n_h_u)
     global_context = GlobalContext(lambda_h_u)
 
     # Build the helper functions that evaluate the scenario dependent constraints and their Lagrangians.
-    thread_helpers = Vector{ThreadHelpers}(undef, n_threads)
-    for i in 1:n_threads
+    thread_helpers = Vector{ThreadHelpers}(undef, K)
+    for i in 1:K
         thread_helpers[i] = build_thread_helpers(f_theta, g_theta, h_scenario, J, options, dimensions, thread_context[i])
     end
     global_helpers = build_global_helpers(h_u, J, options, dimensions, global_context)
@@ -320,22 +320,22 @@ function PMCMC_OCP_Evaluator(PMCMC_samples::Vector{PMCMC_sample}, V::Array{Float
     end
 
     # Create the thread cache for the automatic differentiation of the dynamic, scenario, and epigraph constraints and their Lagrangians.
-    thread_cache = Vector{ThreadCache}(undef, n_threads)
-    for i in 1:n_threads
-        cache_h_dynamics_x = ADCache(SparseDiffTools.ForwardColorJacCache(thread_helpers[i].h_dynamics_x!, z_scenario_loc, nothing; dx=h_dynamics_x_loc, colorvec=colors_h_dynamics_x, sparsity=sparsity_h_dynamics_x), Float64.(sparsity_h_dynamics_x))
-        cache_h_dynamics_y = ADCache(SparseDiffTools.ForwardColorJacCache(thread_helpers[i].h_dynamics_y!, z_scenario_loc, nothing; dx=h_dynamics_y_loc, colorvec=colors_h_dynamics_y, sparsity=sparsity_h_dynamics_y), Float64.(sparsity_h_dynamics_y))
-        cache_h_scenario = ADCache(SparseDiffTools.ForwardColorJacCache(thread_helpers[i].h_scenario!, z_scenario_loc, nothing; dx=h_scenario_loc, colorvec=colors_h_scenario, sparsity=sparsity_h_scenario), Float64.(sparsity_h_scenario))
+    thread_cache = Vector{ThreadCache}(undef, K)
+    for i in 1:K
+        cache_h_dynamics_x = ADCache(SparseDiffTools.ForwardColorJacCache(thread_helpers[i].h_dynamics_x!, copy(z_scenario_loc), nothing; dx=h_dynamics_x_loc, colorvec=copy(colors_h_dynamics_x), sparsity=copy(sparsity_h_dynamics_x)), copy(Float64.(sparsity_h_dynamics_x)))
+        cache_h_dynamics_y = ADCache(SparseDiffTools.ForwardColorJacCache(thread_helpers[i].h_dynamics_y!, copy(z_scenario_loc), nothing; dx=h_dynamics_y_loc, colorvec=copy(colors_h_dynamics_y), sparsity=copy(sparsity_h_dynamics_y)), copy(Float64.(sparsity_h_dynamics_y)))
+        cache_h_scenario = ADCache(SparseDiffTools.ForwardColorJacCache(thread_helpers[i].h_scenario!, copy(z_scenario_loc), nothing; dx=h_scenario_loc, colorvec=copy(colors_h_scenario), sparsity=copy(sparsity_h_scenario)), copy(Float64.(sparsity_h_scenario)))
         if !options.J_u
-            cache_h_J_max = ADCache(SparseDiffTools.ForwardColorJacCache(thread_helpers[i].h_J_max!, z_scenario_loc, nothing; dx=h_J_max_loc, colorvec=colors_h_J_max, sparsity=sparsity_h_J_max), Float64.(sparsity_h_J_max))
+            cache_h_J_max = ADCache(SparseDiffTools.ForwardColorJacCache(thread_helpers[i].h_J_max!, copy(z_scenario_loc), nothing; dx=h_J_max_loc, colorvec=copy(colors_h_J_max), sparsity=copy(sparsity_h_J_max)), copy(Float64.(sparsity_h_J_max)))
         else
             cache_h_J_max = nothing
         end
         if build_Hessian
-            cache_Hessian_L_dynamics_x = ADCache(SparseDiffTools.ForwardAutoColorHesCache(thread_helpers[i].lagrangian_dynamics_x, z_scenario_loc, colors_Hessian_L_dynamics_x, sparsity_Hessian_L_dynamics_x), Float64.(sparsity_Hessian_L_dynamics_x))
-            cache_Hessian_L_dynamics_y = ADCache(SparseDiffTools.ForwardAutoColorHesCache(thread_helpers[i].lagrangian_dynamics_y, z_scenario_loc, colors_Hessian_L_dynamics_y, sparsity_Hessian_L_dynamics_y), Float64.(sparsity_Hessian_L_dynamics_y))
-            cache_Hessian_L_scenario = ADCache(SparseDiffTools.ForwardAutoColorHesCache(thread_helpers[i].lagrangian_scenario, z_scenario_loc, colors_Hessian_L_scenario, sparsity_Hessian_L_scenario), Float64.(sparsity_Hessian_L_scenario))
+            cache_Hessian_L_dynamics_x = ADCache(SparseDiffTools.ForwardAutoColorHesCache(thread_helpers[i].lagrangian_dynamics_x, copy(z_scenario_loc), copy(colors_Hessian_L_dynamics_x), copy(sparsity_Hessian_L_dynamics_x)), copy(Float64.(sparsity_Hessian_L_dynamics_x)))
+            cache_Hessian_L_dynamics_y = ADCache(SparseDiffTools.ForwardAutoColorHesCache(thread_helpers[i].lagrangian_dynamics_y, copy(z_scenario_loc), copy(colors_Hessian_L_dynamics_y), copy(sparsity_Hessian_L_dynamics_y)), copy(Float64.(sparsity_Hessian_L_dynamics_y)))
+            cache_Hessian_L_scenario = ADCache(SparseDiffTools.ForwardAutoColorHesCache(thread_helpers[i].lagrangian_scenario, copy(z_scenario_loc), copy(colors_Hessian_L_scenario), copy(sparsity_Hessian_L_scenario)), copy(Float64.(sparsity_Hessian_L_scenario)))
             if !options.J_u
-                cache_Hessian_L_J_max = ADCache(SparseDiffTools.ForwardAutoColorHesCache(thread_helpers[i].lagrangian_J_max, z_scenario_loc, colors_Hessian_L_J_max, sparsity_Hessian_L_J_max), Float64.(sparsity_Hessian_L_J_max))
+                cache_Hessian_L_J_max = ADCache(SparseDiffTools.ForwardAutoColorHesCache(thread_helpers[i].lagrangian_J_max, copy(z_scenario_loc), copy(colors_Hessian_L_J_max), copy(sparsity_Hessian_L_J_max)), copy(Float64.(sparsity_Hessian_L_J_max)))
             else
                 cache_Hessian_L_J_max = nothing
             end

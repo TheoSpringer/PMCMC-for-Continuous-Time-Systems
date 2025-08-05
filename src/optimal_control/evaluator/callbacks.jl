@@ -110,7 +110,7 @@ function MOI.eval_constraint_jacobian(e::PMCMC_OCP_Evaluator, constraint_Jacobia
         thread_cache = e.thread_cache[thread_id]
 
         # Get local decision vector.
-        z_scenario = view_z_scenario(z, k, e.options, e.indices)
+        z_scenario = collect(view_z_scenario(z, k, e.options, e.indices))
 
         # Fill the data in the thread context.
         thread_cache.context.V_k = @views e.data.V[:, :, k]
@@ -161,68 +161,86 @@ function MOI.eval_hessian_lagrangian(e::PMCMC_OCP_Evaluator, hessian_Lagrangian_
     # In special cases the Hessian pattern must be deduplicated.
     # However, the deduplication adds additional overhead, so it should only be used if necessary.
     if !e.options.deduplicate_Hessian
-        hessian_Lagrangian_buffer = @views hessian_Lagrangian_values
+        hessian_Lagrangian_global_buffer = copy(hessian_Lagrangian_values)
     else
-        hessian_Lagrangian_buffer = zeros(length(e.Hessian_pattern_L))
+        hessian_Lagrangian_global_buffer = zeros(length(e.Hessian_pattern_L))
     end
+
+    hessian_Lagrangian_thread_buffer = [similar(hessian_Lagrangian_global_buffer) for _ in 1:e.dimensions.K]
 
     # Evaluate the Hessian of the local Lagrangians for all scenarios thread-parallel and fill the values to the vector containing the non-zero entries of the global Hessian of the Lagrangian.
     for k in 1:e.dimensions.K
         # Get thread id and cache.
-        thread_id = k
+        thread_id = Threads.threadid()
         thread_cache = e.thread_cache[thread_id]
+        hessian_Lagrangian_buffer = hessian_Lagrangian_thread_buffer[k]
 
         # Get local decision vector.
-        z_scenario = view_z_scenario(z, k, e.options, e.indices)
+        z_scenario = collect(view_z_scenario(z, k, e.options, e.indices))
 
         # Fill the data in the thread context.
-        thread_cache.context.V_k = @views e.data.V[:, :, k]
-        thread_cache.context.W_k = @views e.data.W[:, :, k]
-        thread_cache.context.theta = @views e.data.PMCMC_samples[k].theta
-        thread_cache.context.lambda_h_dynamics_x = @views lambda[e.indices.h_dynamics_x[k]]
-        thread_cache.context.lambda_h_dynamics_y = @views lambda[e.indices.h_dynamics_y[k]]
-        thread_cache.context.lambda_h_scenario = @views lambda[e.indices.h_scenario[k]]
+        thread_cache.context.V_k = copy(e.data.V[:, :, k])
+        thread_cache.context.W_k = copy(e.data.W[:, :, k])
+        thread_cache.context.theta = copy(e.data.PMCMC_samples[k].theta)
+        thread_cache.context.lambda_h_dynamics_x = copy(lambda[e.indices.h_dynamics_x[k]])
+        thread_cache.context.lambda_h_dynamics_y = copy(lambda[e.indices.h_dynamics_y[k]])
+        thread_cache.context.lambda_h_scenario = copy(lambda[e.indices.h_scenario[k]])
         if !e.options.J_u
-            thread_cache.context.lambda_h_J_max = @views lambda[e.indices.h_J_max[k]]
+            thread_cache.context.lambda_h_J_max = copy(lambda[e.indices.h_J_max[k]])
         end
 
         # Compute Hessian of the local Lagrangian of the dynamic constraints for the considered scenario.
-        SparseDiffTools.autoauto_color_hessian!(thread_cache.Hessian_L_dynamics_x.buffer, thread_cache.helpers.lagrangian_dynamics_x, z_scenario, thread_cache.Hessian_L_dynamics_x.autodiff_cache)
-        SparseDiffTools.autoauto_color_hessian!(thread_cache.Hessian_L_dynamics_y.buffer, thread_cache.helpers.lagrangian_dynamics_y, z_scenario, thread_cache.Hessian_L_dynamics_y.autodiff_cache)
+        # SparseDiffTools.autoauto_color_hessian!(thread_cache.Hessian_L_dynamics_x.buffer, thread_cache.helpers.lagrangian_dynamics_x, z_scenario, thread_cache.Hessian_L_dynamics_x.autodiff_cache)
+        # SparseDiffTools.autoauto_color_hessian!(thread_cache.Hessian_L_dynamics_y.buffer, thread_cache.helpers.lagrangian_dynamics_y, z_scenario, thread_cache.Hessian_L_dynamics_y.autodiff_cache)
 
-        hessian_Lagrangian_buffer[e.nzrange_Hessian_L.L_dynamics_x[k]] .= thread_cache.Hessian_L_dynamics_x.buffer.nzval
-        hessian_Lagrangian_buffer[e.nzrange_Hessian_L.L_dynamics_y[k]] .= thread_cache.Hessian_L_dynamics_y.buffer.nzval
+        Hx = ForwardDiff.hessian(thread_cache.helpers.lagrangian_dynamics_x, z_scenario)
+        Hy = ForwardDiff.hessian(thread_cache.helpers.lagrangian_dynamics_y, z_scenario)
+
+        hessian_Lagrangian_buffer[e.nzrange_Hessian_L.L_dynamics_x[k]] = collect(Hx[thread_cache.Hessian_L_dynamics_x.autodiff_cache.sparsity.!=0][:])
+        hessian_Lagrangian_buffer[e.nzrange_Hessian_L.L_dynamics_y[k]] = collect(Hy[thread_cache.Hessian_L_dynamics_y.autodiff_cache.sparsity.!=0][:])
 
         # Compute Hessian of the local Lagrangian of the scenario constraints for the considered scenario and fill the values to the vector containing the non-zero entries of the Hessian of the Lagrangian.
-        SparseDiffTools.autoauto_color_hessian!(thread_cache.Hessian_L_scenario.buffer, thread_cache.helpers.lagrangian_scenario, z_scenario, thread_cache.Hessian_L_scenario.autodiff_cache)
-        hessian_Lagrangian_buffer[e.nzrange_Hessian_L.L_scenario[k]] .= thread_cache.Hessian_L_scenario.buffer.nzval
+        # SparseDiffTools.autoauto_color_hessian!(thread_cache.Hessian_L_scenario.buffer, thread_cache.helpers.lagrangian_scenario, z_scenario, thread_cache.Hessian_L_scenario.autodiff_cache)
+        H_scen = ForwardDiff.hessian(thread_cache.helpers.lagrangian_scenario, z_scenario)
+
+        hessian_Lagrangian_buffer[e.nzrange_Hessian_L.L_scenario[k]] = collect(H_scen[thread_cache.Hessian_L_scenario.autodiff_cache.sparsity.!=0][:])
 
         # Compute the Hessian of the local Lagrangian of the epigraph constraint J^[k] - J_max <= 0 (if used) for the considered scenario and fill the values to the vector containing the non-zero entries of the Hessian of the Lagrangian.
         if !e.options.J_u
             thread_cache.context.lambda_h_J_max = @views lambda[e.indices.h_J_max[k]]
-            SparseDiffTools.autoauto_color_hessian!(thread_cache.Hessian_L_J_max.buffer, thread_cache.helpers.lagrangian_J_max, z_scenario, thread_cache.Hessian_L_J_max.autodiff_cache)
-            hessian_Lagrangian_buffer[e.nzrange_Hessian_L.L_J_max[k]] .= thread_cache.Hessian_L_J_max.buffer.nzval
+            # SparseDiffTools.autoauto_color_hessian!(thread_cache.Hessian_L_J_max.buffer, thread_cache.helpers.lagrangian_J_max, z_scenario, thread_cache.Hessian_L_J_max.autodiff_cache)
+            H_J = ForwardDiff.hessian(thread_cache.helpers.lagrangian_J_max, z_scenario)
+            hessian_Lagrangian_buffer[e.nzrange_Hessian_L.L_J_max[k]] = collect(H_J[thread_cache.Hessian_L_J_max.autodiff_cache.sparsity.!=0][:])
         end
     end
+    for i in 1:Threads.nthreads()
+        hessian_Lagrangian_global_buffer .+= hessian_Lagrangian_thread_buffer[i]
+    end
+
     # Get control inputs.
-    U_vec = view_U_vec(z, e.indices)
+    U_vec = collect(view_U_vec(z, e.indices))
 
     # Fill the Lagrange multipliers in the global context.
-    e.global_cache.context.lambda_h_u = @views lambda[e.indices.h_u]
+    e.global_cache.context.lambda_h_u = copy(lambda[e.indices.h_u])
 
     # Evaluate the Hessian of the local Lagrangian of the input constraints h_u(U) and fill the values to the vector containing the non-zero entries of the Hessian of the Lagrangian.
-    SparseDiffTools.autoauto_color_hessian!(e.global_cache.Hessian_L_u.buffer, e.global_cache.helpers.lagrangian_u, U_vec, e.global_cache.Hessian_L_u.autodiff_cache)
-    hessian_Lagrangian_buffer[e.nzrange_Hessian_L.L_u] .= e.global_cache.Hessian_L_u.buffer.nzval
+    # SparseDiffTools.autoauto_color_hessian!(e.global_cache.Hessian_L_u.buffer, e.global_cache.helpers.lagrangian_u, U_vec, e.global_cache.Hessian_L_u.autodiff_cache)
+    # hessian_Lagrangian_buffer[e.nzrange_Hessian_L.L_u] .= e.global_cache.Hessian_L_u.buffer.nzval
+    Hu = ForwardDiff.hessian(e.global_cache.helpers.lagrangian_u, U_vec)
+    hessian_Lagrangian_global_buffer[e.nzrange_Hessian_L.L_u] .= collect(Hu[e.global_cache.Hessian_L_u.autodiff_cache.sparsity.!=0][:])
 
     # Evaluate the Hessian of the objective function. If the epigraph notation is used, the Hessian of the objective function is zero and thus ignored.
     if e.options.J_u
         SparseDiffTools.autoauto_color_hessian!(e.global_cache.Hessian_J_u.buffer, e.global_cache.helpers.eval_J_u, U_vec, e.global_cache.Hessian_J_u.autodiff_cache)
-        hessian_Lagrangian_buffer[e.nzrange_Hessian_L.L_J_u] .= sigma .* e.global_cache.Hessian_J_u.buffer.nzval
+        hessian_Lagrangian_global_buffer[e.nzrange_Hessian_L.L_J_u] .= sigma .* e.global_cache.Hessian_J_u.buffer.nzval
     end
 
     # Deduplicate the Hessian pattern if necessary.
     if e.options.deduplicate_Hessian
-        _, deduplicated_values = deduplicate_pattern(e.Hessian_pattern_L, hessian_Lagrangian_buffer)
+        _, deduplicated_values = deduplicate_pattern(e.Hessian_pattern_L, hessian_Lagrangian_global_buffer)
         copyto!(hessian_Lagrangian_values, deduplicated_values)
+    else
+        copyto!(hessian_Lagrangian_values, hessian_Lagrangian_global_buffer)
     end
+    # return hessian_Lagrangian_values
 end

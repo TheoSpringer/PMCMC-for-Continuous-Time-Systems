@@ -188,12 +188,12 @@ h_u(u) = [
 ]
 
 # Parameters for the OCP.
-H = 30 # time horizon in days
+H = 10 # time horizon in days
 K_warmup = ceil(Int, K_pre_solve / 4) # number of samples used to warmup the initialization process of the OCP to get a good initial guess fast
 
 # IPOPT options.
 # See https://coin-or.github.io/Ipopt/OPTIONS.html for more details.
-Ipopt_options = Dict("max_iter" => 1000, "tol" => 1e-6, "acceptable_tol" => 1e-4, "linear_solver" => "mumps", "hessian_approximation" => "exact", "print_level" => 5, "derivative_test" => "second-order", "derivative_test_tol" => 1e-4, "derivative_test_print_all" => "no")
+Ipopt_options = Dict("max_iter" => 1000, "tol" => 1e-6, "acceptable_tol" => 1e-4, "linear_solver" => "mumps", "hessian_approximation" => "exact", "print_level" => 5, "derivative_test" => "only-second-order", "derivative_test_tol" => 1e-4, "derivative_test_print_all" => "no")
 if hsl_available
     Ipopt_options["hsllib"] = HSL_jll.libhsl_path
     Ipopt_options["linear_solver"] = "ma57"

@@ -1,4 +1,4 @@
 *
-!.devcontainer/
-!Project.toml 
+!.devcontainer/**
+!Project.toml
 !Manifest.toml

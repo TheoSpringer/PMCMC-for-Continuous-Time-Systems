@@ -140,11 +140,8 @@ function solve_PMCMC_OCP(PMCMC_samples::Vector{PMCMC_sample}, f_theta::Function,
     # If the limited-memory Hessian approximation is used, the Hessian sparsity structure is not computed.
     build_Hessian = get(solver_opts, "hessian_approximation", "") != "limited-memory"
 
-    # If the IPOPT derivative checker is used, the Hessian pattern must be deduplicated.
-    deduplicate_Hessian = get(solver_opts, "derivative_test", "") == "second-order"
-
     # Create evaluator.
-    evaluator = PMCMC_OCP_Evaluator(PMCMC_samples, V, W, X_t, f_theta, g_theta, J, J_u, h_scenario, h_u, n_u, n_x, n_y, H; build_Hessian=build_Hessian, deduplicate_Hessian=false)
+    evaluator = PMCMC_OCP_Evaluator(PMCMC_samples, V, W, X_t, f_theta, g_theta, J, J_u, h_scenario, h_u, n_u, n_x, n_y, H; build_Hessian=build_Hessian, deduplicate_Hessian=true)
 
     # Create model.
     model = MOI.Utilities.UniversalFallback(MOI.Utilities.Model{Float64}())

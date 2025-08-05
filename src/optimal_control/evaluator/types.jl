@@ -65,19 +65,19 @@ end
 # so that a single pre-built closure and a single AD cache can be reused without reallocation.
 mutable struct ThreadContext{Tθ,TV,TW,Tλ}
     # Data
-    theta::Array{Tθ}
-    V_k::Matrix{TV}
-    W_k::Matrix{TW}
+    theta::AbstractArray{Tθ}
+    V_k::AbstractArray{TV}
+    W_k::AbstractArray{TW}
 
     # Lagrange multipliers
-    lambda_h_dynamics_x::Vector{Tλ}
-    lambda_h_dynamics_y::Vector{Tλ}
-    lambda_h_scenario::Vector{Tλ}
-    lambda_h_J_max::Union{Vector{Tλ},Nothing}
+    lambda_h_dynamics_x::AbstractVector{Tλ}
+    lambda_h_dynamics_y::AbstractVector{Tλ}
+    lambda_h_scenario::AbstractVector{Tλ}
+    lambda_h_J_max::Union{AbstractVector{Tλ},Nothing}
 end
 
 mutable struct GlobalContext{T}
-    lambda_h_u::Vector{T}
+    lambda_h_u::AbstractVector{T}
 end
 
 # The following struct contains functions to evaluate the dynamic constraints for the states and outputs, the scenario constraints, and the epigraph constraints for a scenario and the corresponding Lagrangians.

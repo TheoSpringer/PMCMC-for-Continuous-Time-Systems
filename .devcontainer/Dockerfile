@@ -43,13 +43,18 @@ WORKDIR ${USER_HOME}
 # Create a Julia package depot
 ENV JULIA_DEPOT_PATH="/home/developer/.julia"
 
+# Copy, extract and develop HSL_jll.jl.
+COPY --chown=${USER_NAME}:${USER_NAME} .devcontainer/HSL_jll.jl.v2024.11.28.tar.gz ${USER_HOME}/
+
+RUN mkdir -p $JULIA_DEPOT_PATH/dev/HSL_jll \
+    && tar -xzf HSL_jll.jl.v2024.11.28.tar.gz \
+        -C $JULIA_DEPOT_PATH/dev/HSL_jll --strip-components=1 \
+    && rm HSL_jll.jl.v2024.11.28.tar.gz
+
+RUN julia -e 'using Pkg; Pkg.activate(); Pkg.develop(path=ENV["JULIA_DEPOT_PATH"]*"/dev/HSL_jll", shared=true); Pkg.precompile()'
+
 # Copy Project.toml and Manifest.toml, copy and extract HSL_jll.jl, and install all packages.
 COPY --chown=${USER_NAME}:${USER_NAME} Project.toml Manifest.toml ${USER_HOME}/
-COPY --chown=${USER_NAME}:${USER_NAME} .devcontainer/HSL_jll.jl.v2024.11.28.tar.gz ${USER_HOME}/
-RUN tar -xzvf HSL_jll.jl.v2024.11.28.tar.gz \
-    && julia -e 'using Pkg; Pkg.activate(); Pkg.develop(path="HSL_jll.jl.v2024.11.28", shared=true, preserve=Pkg.PRESERVE_TIERED); Pkg.instantiate(); Pkg.activate(.); Pkg.instantiate()' \
-    && rm HSL_jll.jl.v2024.11.28.tar.gz \
-    && rm HSL_jll.pdf\
-    && rm build_tarballs.jl \
+RUN julia -e 'using Pkg; Pkg.activate("."); Pkg.instantiate()' \
     && rm Project.toml \
     && rm Manifest.toml
