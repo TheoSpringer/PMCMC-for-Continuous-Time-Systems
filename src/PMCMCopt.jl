@@ -13,9 +13,11 @@ using JuMP
 using Symbolics
 import MathOptInterface as MOI
 using Ipopt
-import ForwardDiff
 using SparseArrays
-using SparseDiffTools
+using ADTypes
+using DifferentiationInterface
+using SparseConnectivityTracer
+using SparseMatrixColorings
 
 export PMCMC_sample, particle_filter, adapt_N, particle_MMH, staged_PMMH, compute_ess, compute_gelman_rubin, epsilon, solve_PMMH_OCP, solve_PMMH_OCP_greedy_guarantees, test_prediction, plot_predictions, plot_autocorrelation, plot_parameter_trace, plot_parameter_pdf
 

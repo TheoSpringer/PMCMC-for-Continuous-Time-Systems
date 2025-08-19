@@ -1,22 +1,62 @@
-# The following function computes the sparsity pattern of the local Jacobian of a constraint h! with respect to the decision variables z.
-function compute_Jacobian_sparsity(h!, z::AbstractVector, h_loc::AbstractVector)
-    # Evaluate the sparsity pattern of the local Jacobian.
-    local_Jacobian_sparsity = Symbolics.jacobian_sparsity(h!, h_loc, z)
+# Helper function that returns the type of coloring that should be used for the Jacobian.
+# Column coloring is used for forward mode automatic differentiation.
+# Row coloring is used for reverse mode automatic differentiation.
+function coloring_partition(backend::ADTypes.AbstractADType)
+    mode = ADTypes.mode(backend)
+    if mode isa ADTypes.ForwardMode
+        return :column
+    elseif mode isa ADTypes.ReverseMode
+        return :row
+    else
+        return :column # default fallback
+    end
+end
+
+# The following type and functions are required to compute the coloring of the Hessian of the Lagrangian once and reuse it later.
+# For the Jacobian SparseMatrixColorings.ConstantColoringAlgorithm is used.
+# However, the coloring problem for the Hessian of the Lagrangian is symmetric and thus SparseMatrixColorings.ConstantColoringAlgorithm cannot be used.
+# We instead define our own type and functions to return the coloring result.
+struct ConstantSymmetricColoringAlgorithm{M,R} <: SparseMatrixColorings.AbstractColoringAlgorithm
+    template::M
+    result::R
+end
+
+function ConstantSymmetricColoringAlgorithm(hessian_sparsity::AbstractMatrix; algorithm=SparseMatrixColorings.GreedyColoringAlgorithm())
+    if !issymmetric(hessian_sparsity)
+        hessian_sparsity = hessian_sparsity .| hessian_sparsity'
+    end
+    result = SparseMatrixColorings.symmetric_matrix_colors(hessian_sparsity; algorithm)
+    return ConstantSymmetricColoringAlgorithm(hessian_sparsity, result)
+end
+
+function SparseMatrixColorings.coloring(A, problem::SparseMatrixColorings.ColoringProblem{:symmetric,:direct}, algorithm::ConstantSymmetricColoringAlgorithm; kwargs...)
+    if size(A) != size(algorithm.template)
+        error("ConstantSymmetricColoring: size mismatch. Got $(size(A)), expected $(size(algorithm.template)).")
+    end
+    return algorithm.result
+end
+
+# The following function computes the sparsity pattern of the Jacobian of a constraint h! with respect to the decision variables z.
+function compute_Jacobian_sparsity(h!, z::AbstractVector, h_loc::AbstractVector, options::OCPOptions)
+    Jacobian_sparsity = ADTypes.jacobian_sparsity(h!, h_loc, z, options.sparsity_detector)
 
     # Get matrix coloring.
-    local_Jacobian_colors = SparseDiffTools.matrix_colors(local_Jacobian_sparsity)
+    if coloring_partition(options.dense_forward_backend) == :column
+        Jacobian_coloring = ADTypes.column_coloring(Jacobian_sparsity, options.coloring_algorithm)
+    else
+        Jacobian_coloring = ADTypes.row_coloring(Jacobian_sparsity, options.coloring_algorithm)
+    end
 
-    # Find the non-zero entries in the sparsity pattern of the dynamics constraints.
-    sparsity_local_Jacobian_rows, sparsity_local_Jacobian_columns, _ = findnz(local_Jacobian_sparsity)
+    # Find the non-zero entries in the sparsity pattern.
+    sparsity_Jacobian_rows, sparsity_Jacobian_columns, _ = findnz(Jacobian_sparsity)
 
-    return local_Jacobian_sparsity, local_Jacobian_colors, sparsity_local_Jacobian_rows, sparsity_local_Jacobian_columns
+    return Jacobian_sparsity, Jacobian_coloring, sparsity_Jacobian_rows, sparsity_Jacobian_columns
 end
 
 # This function expands the sparsity pattern of the local Jacobian of a constraint with respect to a single scenario to the global index space.
 # The local Jacobian contains only the considered constraints and is defined with respect to the vector z_scenario, which contains the inputs U, states X_k, outputs Y_k, and (optionally) J_max for scenario k.
 # The global Jacobian contains all constraints and is defined with respect to the flat decision vector z, which contains the inputs U, states X of all scenarios, outputs Y of all scenarios, and (optionally) J_max.
 # The global indices of nonzero elements are added to the sparsity_global_Jacobian_rows and sparsity_global_Jacobian_columns vectors.
-# The input indices_h_global[k] contains the indices of the constraints belonging to scenario k in the global constraint vector h(z).
 # The return value nzvals_Jacobian_ranges[k] is the range in the vector containing the non-zero entries of the global Jacobian belonging to scenario k.
 function expand_local_Jacobian_sparsity_pattern!(sparsity_global_Jacobian_rows::AbstractVector{<:Integer}, sparsity_global_Jacobian_columns::AbstractVector{<:Integer}, sparsity_local_Jacobian_rows::Vector{Int}, sparsity_local_Jacobian_columns::Vector{Int}, indices_h_global::Vector{UnitRange{Int}}, options::OCPOptions, dimensions::OCPDimensions, indices::OCPIndices)
     nzvals_Jacobian_ranges = Vector{UnitRange{Int}}(undef, dimensions.K)
@@ -47,32 +87,34 @@ end
 # The following function computes the sparsity pattern of a constraint for a single scenario with respect to the decision variables of that scenario z_scenario.
 # This local sparsity pattern is then expanded to the global index space of the global decision vector z.
 # The corresponding indices of nonzero elements are added to the sparsity_global_Jacobian_rows and sparsity_global_Jacobian_columns vectors.
-# The input indices_h_global[k] contains the indices of the constraint corresponding to scenario k in the global constraint vector h(z).
+# Then a backend for the automatic differentiation of this constraint block is built.
 function register_local_Jacobian_sparsity!(sparsity_global_Jacobian_rows::AbstractVector{<:Integer}, sparsity_global_Jacobian_columns::AbstractVector{<:Integer}, h!::Function, h_loc::AbstractVector, z_scenario::AbstractVector, indices_h_global::Vector{UnitRange{Int}}, options::OCPOptions, dimensions::OCPDimensions, indices::OCPIndices)
     # Evaluate the sparsity pattern of the local Jacobian.
-    local_Jacobian_sparsity, local_Jacobian_colors, sparsity_local_Jacobian_rows, sparsity_local_Jacobian_columns = compute_Jacobian_sparsity(h!, z_scenario, h_loc)
+    local_Jacobian_sparsity, local_Jacobian_colors, sparsity_local_Jacobian_rows, sparsity_local_Jacobian_columns = compute_Jacobian_sparsity(h!, z_scenario, h_loc, options)
 
     # Expand the local sparsity pattern of the dynamics constraints to the global index space.
     nzrange_Jacobian_h = expand_local_Jacobian_sparsity_pattern!(sparsity_global_Jacobian_rows, sparsity_global_Jacobian_columns, sparsity_local_Jacobian_rows, sparsity_local_Jacobian_columns, indices_h_global, options, dimensions, indices)[1]
 
-    return nzrange_Jacobian_h, local_Jacobian_colors, local_Jacobian_sparsity
+    # Create a sparsity detector and a coloring algorithm that return the pre-computed pattern/coloring.
+    constant_sparsity_detector = ADTypes.KnownJacobianSparsityDetector(local_Jacobian_sparsity)
+    constant_coloring_algorithm = SparseMatrixColorings.ConstantColoringAlgorithm(local_Jacobian_sparsity, local_Jacobian_colors; partition=coloring_partition(options.dense_forward_backend))
+
+    backend = DifferentiationInterface.AutoSparse(options.dense_forward_backend, constant_sparsity_detector, constant_coloring_algorithm)
+
+    return nzrange_Jacobian_h, backend
 end
 
-# The following function computes the sparsity pattern of the Hessian of a function (e.g., the local Lagrangian) with respect to the decision variables z.
-function compute_Hessian_sparsity(f::Function, z::AbstractVector)
-    # Evaluate the sparsity pattern of the local Hessian.
-    local_Hessian_sparsity = Symbolics.hessian_sparsity(f, z)
-
-    # Keep only the lower triangular part of the Hessian sparsity pattern.
-    local_Hessian_sparsity = tril(local_Hessian_sparsity, 0)
+# The following function computes the sparsity pattern of the Hessian of the function f with respect to the decision variables z.
+function compute_Hessian_sparsity(f::Function, z::AbstractVector, options::OCPOptions)
+    Hessian_sparsity = ADTypes.hessian_sparsity(f, z, options.sparsity_detector)
 
     # Get matrix coloring.
-    local_Hessian_colors = SparseDiffTools.matrix_colors(local_Hessian_sparsity)
+    Hessian_coloring = ADTypes.symmetric_coloring(Hessian_sparsity, options.coloring_algorithm)
 
-    # Find the non-zero entries in the sparsity pattern of the dynamics constraints.
-    sparsity_local_Hessian_rows, sparsity_local_Hessian_columns, _ = findnz(local_Hessian_sparsity)
+    # Find the non-zero entries in the sparsity pattern.
+    sparsity_Hessian_rows, sparsity_Hessian_columns, _ = findnz(Hessian_sparsity)
 
-    return local_Hessian_sparsity, local_Hessian_colors, sparsity_local_Hessian_rows, sparsity_local_Hessian_columns
+    return Hessian_sparsity, Hessian_coloring, sparsity_Hessian_rows, sparsity_Hessian_columns
 end
 
 # This function expands the sparsity pattern of the Hessian of a local Lagrangian with respect to a single scenario to the global index space.
@@ -110,15 +152,21 @@ end
 # The following function computes the sparsity pattern of the Hessian of a local Lagrangian with respect to the decision variables of that scenario.
 # This local sparsity pattern is then expanded to the global index space of the global decision vector z.
 # The corresponding indices of nonzero elements are added to the sparsity_global_Hessian_rows and sparsity_global_Hessian_columns vectors.
-# Then a cache for the automatic differentiation of this local Lagrangian is built.
+# Then a backend for the automatic differentiation of this local Lagrangian is built.
 function register_local_Hessian_sparsity!(sparsity_global_Hessian_rows::AbstractVector{<:Integer}, sparsity_global_Hessian_columns::AbstractVector{<:Integer}, lagrangian::Function, z_scenario::AbstractVector, options::OCPOptions, dimensions::OCPDimensions, indices::OCPIndices)
     # Evaluate the sparsity pattern of the local Jacobian.
-    local_Hessian_sparsity, local_Hessian_colors, sparsity_local_Hessian_rows, sparsity_local_Hessian_columns = compute_Hessian_sparsity(lagrangian, z_scenario)
+    local_Hessian_sparsity, local_Hessian_colors, sparsity_local_Hessian_rows, sparsity_local_Hessian_columns = compute_Hessian_sparsity(lagrangian, z_scenario, options)
 
     # Expand the local sparsity pattern of the dynamics constraints to the global index space.
     nzrange_Hessian_L = expand_local_Hessian_sparsity!(sparsity_global_Hessian_rows, sparsity_global_Hessian_columns, sparsity_local_Hessian_rows, sparsity_local_Hessian_columns, options, dimensions, indices)[1]
 
-    return nzrange_Hessian_L, local_Hessian_colors, local_Hessian_sparsity
+    # Create a sparsity detector and a coloring algorithm that return the pre-computed pattern/coloring.
+    constant_sparsity_detector = ADTypes.KnownHessianSparsityDetector(local_Hessian_sparsity)
+    constant_coloring_algorithm = SparseMatrixColorings.ConstantColoringAlgorithm(local_Hessian_sparsity, local_Hessian_colors; partition=:row)
+
+    backend = DifferentiationInterface.AutoSparse(options.dense_second_order_backend, constant_sparsity_detector, constant_coloring_algorithm)
+
+    return nzrange_Hessian_L, backend
 end
 
 # The following function deduplicates the non-zero entries of the global Hessian sparsity pattern.

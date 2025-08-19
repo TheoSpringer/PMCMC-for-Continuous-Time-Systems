@@ -2,6 +2,10 @@ struct OCPOptions
     build_Hessian::Bool # if true, the Hessian of the Lagrangian is built
     deduplicate_Hessian::Bool # if true, the Hessian pattern is deduplicated
     J_u::Bool # if false, the epigraph constraint is included
+    sparsity_detector::ADTypes.AbstractSparsityDetector # the sparsity detector used to compute the sparsity pattern of the Jacobian and the Hessian of the Lagrangian
+    coloring_algorithm::ADTypes.AbstractColoringAlgorithm # the coloring algorithm used to compute the coloring of the Jacobian and the Hessian of the Lagrangian
+    dense_forward_backend::ADTypes.AbstractADType # the dense forward differentiation backend used to compute the constraint Jacobian
+    dense_second_order_backend::DifferentiationInterface.SecondOrder # the dense second order differentiation backend used to compute the Hessian of the Lagrangian
 end
 
 # The following struct contains all dimensions relevant for the optimal control problem.
@@ -39,6 +43,22 @@ struct OCPData
     X_t::Array{Float64,2}
 end
 
+# The following struct contains functions to evaluate a block of the constraint vector h(z) belonging to one scenario and the corresponding Lagrangian.
+# In case a cost function that depends only on the inputs (i.e., J(U)) is used, it also contains the objective function.
+struct OCPFunctions
+    h_dynamics_x!::Function # dynamic constraints for the states
+    h_dynamics_y!::Function # dynamic constraints for the outputs
+    h_scenario!::Function # scenario constraints
+    h_u!::Function # input constraints
+    h_J_max!::Union{Function,Nothing} # epigraph constraints (optional)
+    eval_J_u::Union{Function,Nothing} # evaluates J(u)
+    lagrangian_dynamics_x::Union{Function,Nothing} # Lagrangian of the dynamics constraints for the states
+    lagrangian_dynamics_y::Union{Function,Nothing} # Lagrangian of the dynamics constraints for the outputs
+    lagrangian_scenario::Union{Function,Nothing} # Lagrangian of the scenario constraints
+    lagrangian_u::Union{Function,Nothing} # Lagrangian of the input constraints
+    lagrangian_J_max::Union{Function,Nothing} # Lagrangian of the epigraph constraints (optional)
+end
+
 # The following struct contains the ranges corresponding to specific constraints in the vector containing the non-zero entries of the global Jacobian.
 struct SparseJacobianNZRanges
     h_dynamics_x::Vector{UnitRange{Int}}
@@ -58,76 +78,23 @@ struct SparseHessianNZRanges
     L_J_u::Union{UnitRange{Int},Nothing}
 end
 
-# The following struct contains the context for a single thread.
-# The context holds references to the data of a scenario (theta, V, W), 
-# the current Lagrange multipliers, and some buffers used to evaluate the Lagrangian.
-# During the optimization, these references are mutated in place (their contents are overwritten) 
-# so that a single pre-built closure and a single AD cache can be reused without reallocation.
-mutable struct ThreadContext{Tθ,TV,TW,Tλ}
-    # Data
-    theta::AbstractArray{Tθ}
-    V_k::AbstractArray{TV}
-    W_k::AbstractArray{TW}
-
-    # Lagrange multipliers
-    lambda_h_dynamics_x::AbstractVector{Tλ}
-    lambda_h_dynamics_y::AbstractVector{Tλ}
-    lambda_h_scenario::AbstractVector{Tλ}
-    lambda_h_J_max::Union{AbstractVector{Tλ},Nothing}
-end
-
-mutable struct GlobalContext{T}
-    lambda_h_u::AbstractVector{T}
-end
-
-# The following struct contains functions to evaluate the dynamic constraints for the states and outputs, the scenario constraints, and the epigraph constraints for a scenario and the corresponding Lagrangians.
-struct ThreadHelpers
-    h_dynamics_x!::Function # dynamic constraints for the states
-    h_dynamics_y!::Function # dynamic constraints for the outputs
-    h_scenario!::Function # scenario constraints
-    h_J_max!::Union{Function,Nothing} # epigraph constraints (optional)
-    lagrangian_dynamics_x::Union{Function,Nothing} # Lagrangian of the dynamics constraints for the states
-    lagrangian_dynamics_y::Union{Function,Nothing} # Lagrangian of the dynamics constraints for the outputs
-    lagrangian_scenario::Union{Function,Nothing} # Lagrangian of the scenario constraints
-    lagrangian_J_max::Union{Function,Nothing} # Lagrangian of the epigraph constraints (optional)
-end
-
-# The following struct contains functions to evaluate the input constraints h(u), the corresponding Lagrangian, and the cost function if it depends only on the inputs u.
-struct GlobalHelpers
-    h_u!::Function # input constraints
-    eval_J_u::Union{Function,Nothing} # evaluates J(u)
-    lagrangian_u::Union{Function,Nothing} # Lagrangian of the input constraints
-end
-
-# The following struct contains the cached data for the automatic differentiation.
-struct ADCache{CacheType,MatrixType}
-    autodiff_cache::CacheType
-    buffer::MatrixType
-end
-
 # The following struct contains the cached data for the automatic differentiation of the dynamic, scenario, and epigraph constraints and their Lagrangians.
 struct ThreadCache
-    Jacobian_h_dynamics_x::ADCache
-    Jacobian_h_dynamics_y::ADCache
-    Jacobian_h_scenario::ADCache
-    Jacobian_h_J_max::Union{ADCache,Nothing}
+    Jac_h_dynamics_x::DifferentiationInterface.JacobianPrep
+    Jac_h_dynamics_y::DifferentiationInterface.JacobianPrep
+    Jac_h_scenario::DifferentiationInterface.JacobianPrep
+    Jac_h_J_max::Union{DifferentiationInterface.JacobianPrep,Nothing}
 
-    Hessian_L_dynamics_x::Union{ADCache,Nothing}
-    Hessian_L_dynamics_y::Union{ADCache,Nothing}
-    Hessian_L_scenario::Union{ADCache,Nothing}
-    Hessian_L_J_max::Union{ADCache,Nothing}
-
-    helpers::ThreadHelpers
-    context::ThreadContext
+    Hes_L_dynamics_x::Union{DifferentiationInterface.HessianPrep,Nothing}
+    Hes_L_dynamics_y::Union{DifferentiationInterface.HessianPrep,Nothing}
+    Hes_L_scenario::Union{DifferentiationInterface.HessianPrep,Nothing}
+    Hes_L_J_max::Union{DifferentiationInterface.HessianPrep,Nothing}
 end
 
 # The following struct contains the cached data for the automatic differentiation of the input constraints.
 struct GlobalCache
-    Jacobian_h_u::ADCache
+    Jac_h_u::DifferentiationInterface.JacobianPrep
 
-    Hessian_L_u::Union{ADCache,Nothing}
-    Hessian_J_u::Union{ADCache,Nothing}
-
-    context::GlobalContext
-    helpers::GlobalHelpers
+    Hes_L_u::Union{DifferentiationInterface.HessianPrep,Nothing}
+    Hes_J_u::Union{DifferentiationInterface.HessianPrep,Nothing}
 end
