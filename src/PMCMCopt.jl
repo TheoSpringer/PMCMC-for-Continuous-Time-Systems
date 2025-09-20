@@ -18,6 +18,9 @@ using ADTypes
 using DifferentiationInterface
 using SparseConnectivityTracer
 using SparseMatrixColorings
+using ForwardDiff
+using ReverseDiff
+using Zygote
 
 export PMCMC_sample, particle_filter, adapt_N, particle_MMH, staged_PMMH, compute_ess, compute_gelman_rubin, epsilon, solve_PMMH_OCP, solve_PMMH_OCP_greedy_guarantees, test_prediction, plot_predictions, plot_autocorrelation, plot_parameter_trace, plot_parameter_pdf
 
@@ -38,6 +41,7 @@ include("sampling/particle_MMH_blocked.jl")
 include("sampling/diagnostics.jl")
 include("optimal_control/epsilon.jl")
 include("optimal_control/optimal_control.jl")
+# include("optimal_control/optimal_control_legacy.jl")
 include("optimal_control/evaluator/types.jl")
 include("optimal_control/evaluator/indices.jl")
 include("optimal_control/evaluator/helpers.jl")

@@ -16,7 +16,7 @@ end
 # For the Jacobian SparseMatrixColorings.ConstantColoringAlgorithm is used.
 # However, the coloring problem for the Hessian of the Lagrangian is symmetric and thus SparseMatrixColorings.ConstantColoringAlgorithm cannot be used.
 # We instead define our own type and functions to return the coloring result.
-struct ConstantSymmetricColoringAlgorithm{M,R} <: SparseMatrixColorings.AbstractColoringAlgorithm
+struct ConstantSymmetricColoringAlgorithm{M,R} <: ADTypes.AbstractColoringAlgorithm
     template::M
     result::R
 end
@@ -25,11 +25,12 @@ function ConstantSymmetricColoringAlgorithm(hessian_sparsity::AbstractMatrix; al
     if !issymmetric(hessian_sparsity)
         hessian_sparsity = hessian_sparsity .| hessian_sparsity'
     end
-    result = SparseMatrixColorings.symmetric_matrix_colors(hessian_sparsity; algorithm)
+    coloring_problem = SparseMatrixColorings.ColoringProblem(; structure=:symmetric, partition=:column)
+    result = SparseMatrixColorings.coloring(hessian_sparsity, coloring_problem, algorithm)
     return ConstantSymmetricColoringAlgorithm(hessian_sparsity, result)
 end
 
-function SparseMatrixColorings.coloring(A, problem::SparseMatrixColorings.ColoringProblem{:symmetric,:direct}, algorithm::ConstantSymmetricColoringAlgorithm; kwargs...)
+function SparseMatrixColorings.coloring(A, problem::SparseMatrixColorings.ColoringProblem{:symmetric,P}, algorithm::ConstantSymmetricColoringAlgorithm; kwargs...) where {P}
     if size(A) != size(algorithm.template)
         error("ConstantSymmetricColoring: size mismatch. Got $(size(A)), expected $(size(algorithm.template)).")
     end
@@ -101,20 +102,17 @@ function register_local_Jacobian_sparsity!(sparsity_global_Jacobian_rows::Abstra
 
     backend = DifferentiationInterface.AutoSparse(options.dense_forward_backend, constant_sparsity_detector, constant_coloring_algorithm)
 
-    return nzrange_Jacobian_h, backend
+    return local_Jacobian_sparsity, nzrange_Jacobian_h, backend
 end
 
 # The following function computes the sparsity pattern of the Hessian of the function f with respect to the decision variables z.
 function compute_Hessian_sparsity(f::Function, z::AbstractVector, options::OCPOptions)
     Hessian_sparsity = ADTypes.hessian_sparsity(f, z, options.sparsity_detector)
 
-    # Get matrix coloring.
-    Hessian_coloring = ADTypes.symmetric_coloring(Hessian_sparsity, options.coloring_algorithm)
-
     # Find the non-zero entries in the sparsity pattern.
     sparsity_Hessian_rows, sparsity_Hessian_columns, _ = findnz(Hessian_sparsity)
 
-    return Hessian_sparsity, Hessian_coloring, sparsity_Hessian_rows, sparsity_Hessian_columns
+    return Hessian_sparsity, sparsity_Hessian_rows, sparsity_Hessian_columns
 end
 
 # This function expands the sparsity pattern of the Hessian of a local Lagrangian with respect to a single scenario to the global index space.
@@ -155,18 +153,18 @@ end
 # Then a backend for the automatic differentiation of this local Lagrangian is built.
 function register_local_Hessian_sparsity!(sparsity_global_Hessian_rows::AbstractVector{<:Integer}, sparsity_global_Hessian_columns::AbstractVector{<:Integer}, lagrangian::Function, z_scenario::AbstractVector, options::OCPOptions, dimensions::OCPDimensions, indices::OCPIndices)
     # Evaluate the sparsity pattern of the local Jacobian.
-    local_Hessian_sparsity, local_Hessian_colors, sparsity_local_Hessian_rows, sparsity_local_Hessian_columns = compute_Hessian_sparsity(lagrangian, z_scenario, options)
+    local_Hessian_sparsity, sparsity_local_Hessian_rows, sparsity_local_Hessian_columns = compute_Hessian_sparsity(lagrangian, z_scenario, options)
 
     # Expand the local sparsity pattern of the dynamics constraints to the global index space.
     nzrange_Hessian_L = expand_local_Hessian_sparsity!(sparsity_global_Hessian_rows, sparsity_global_Hessian_columns, sparsity_local_Hessian_rows, sparsity_local_Hessian_columns, options, dimensions, indices)[1]
 
     # Create a sparsity detector and a coloring algorithm that return the pre-computed pattern/coloring.
     constant_sparsity_detector = ADTypes.KnownHessianSparsityDetector(local_Hessian_sparsity)
-    constant_coloring_algorithm = SparseMatrixColorings.ConstantColoringAlgorithm(local_Hessian_sparsity, local_Hessian_colors; partition=:row)
+    constant_coloring_algorithm = ConstantSymmetricColoringAlgorithm(local_Hessian_sparsity, algorithm=options.coloring_algorithm)
 
     backend = DifferentiationInterface.AutoSparse(options.dense_second_order_backend, constant_sparsity_detector, constant_coloring_algorithm)
 
-    return nzrange_Hessian_L, backend
+    return local_Hessian_sparsity, nzrange_Hessian_L, backend
 end
 
 # The following function deduplicates the non-zero entries of the global Hessian sparsity pattern.

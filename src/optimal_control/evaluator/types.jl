@@ -78,23 +78,73 @@ struct SparseHessianNZRanges
     L_J_u::Union{UnitRange{Int},Nothing}
 end
 
+# The following struct contains the backends (including the sparsity pattern and coloring algorithm) for the automatic differentiation of the dynamic, scenario, and epigraph constraints and their Lagrangians.
+struct ADBackends
+    # Jacobian backends
+    Jac_h_dynamics_x::ADTypes.AbstractADType
+    Jac_h_dynamics_y::ADTypes.AbstractADType
+    Jac_h_scenario::ADTypes.AbstractADType
+    Jac_h_u::ADTypes.AbstractADType
+    Jac_h_J_max::Union{ADTypes.AbstractADType,Nothing}
+
+    # Hessian backends
+    Hes_L_dynamics_x::Union{ADTypes.AbstractADType,Nothing}
+    Hes_L_dynamics_y::Union{ADTypes.AbstractADType,Nothing}
+    Hes_L_scenario::Union{ADTypes.AbstractADType,Nothing}
+    Hes_L_u::Union{ADTypes.AbstractADType,Nothing}
+    Hes_L_J_max::Union{ADTypes.AbstractADType,Nothing}
+    Hes_J_u::Union{ADTypes.AbstractADType,Nothing}
+end
+
 # The following struct contains the cached data for the automatic differentiation of the dynamic, scenario, and epigraph constraints and their Lagrangians.
 struct ThreadCache
-    Jac_h_dynamics_x::DifferentiationInterface.JacobianPrep
-    Jac_h_dynamics_y::DifferentiationInterface.JacobianPrep
-    Jac_h_scenario::DifferentiationInterface.JacobianPrep
-    Jac_h_J_max::Union{DifferentiationInterface.JacobianPrep,Nothing}
+    # Jacobian preparations
+    prep_Jac_h_dynamics_x::DifferentiationInterface.JacobianPrep
+    prep_Jac_h_dynamics_y::DifferentiationInterface.JacobianPrep
+    prep_Jac_h_scenario::DifferentiationInterface.JacobianPrep
+    prep_Jac_h_J_max::Union{DifferentiationInterface.JacobianPrep,Nothing}
 
-    Hes_L_dynamics_x::Union{DifferentiationInterface.HessianPrep,Nothing}
-    Hes_L_dynamics_y::Union{DifferentiationInterface.HessianPrep,Nothing}
-    Hes_L_scenario::Union{DifferentiationInterface.HessianPrep,Nothing}
-    Hes_L_J_max::Union{DifferentiationInterface.HessianPrep,Nothing}
+    # Hessian preparations
+    prep_Hes_L_dynamics_x::Union{DifferentiationInterface.HessianPrep,Nothing}
+    prep_Hes_L_dynamics_y::Union{DifferentiationInterface.HessianPrep,Nothing}
+    prep_Hes_L_scenario::Union{DifferentiationInterface.HessianPrep,Nothing}
+    prep_Hes_L_J_max::Union{DifferentiationInterface.HessianPrep,Nothing}
+
+    # Jacobian templates
+    Jac_h_dynamics_x::SparseMatrixCSC{Float64,Int}
+    Jac_h_dynamics_y::SparseMatrixCSC{Float64,Int}
+    Jac_h_scenario::SparseMatrixCSC{Float64,Int}
+    Jac_h_J_max::Union{SparseMatrixCSC{Float64,Int},Nothing}
+
+    # Hessian templates
+    Hes_L_dynamics_x::Union{SparseMatrixCSC{Float64,Int},Nothing}
+    Hes_L_dynamics_y::Union{SparseMatrixCSC{Float64,Int},Nothing}
+    Hes_L_scenario::Union{SparseMatrixCSC{Float64,Int},Nothing}
+    Hes_L_J_max::Union{SparseMatrixCSC{Float64,Int},Nothing}
+
+    # Output templates
+    output_h_dynamics_x::Vector{Float64}
+    output_h_dynamics_y::Vector{Float64}
+    output_h_scenario::Vector{Float64}
+    output_h_J_max::Union{Vector{Float64},Nothing}
 end
 
 # The following struct contains the cached data for the automatic differentiation of the input constraints.
 struct GlobalCache
-    Jac_h_u::DifferentiationInterface.JacobianPrep
+    # Jacobian preparations
+    prep_Jac_h_u::DifferentiationInterface.JacobianPrep
 
-    Hes_L_u::Union{DifferentiationInterface.HessianPrep,Nothing}
-    Hes_J_u::Union{DifferentiationInterface.HessianPrep,Nothing}
+    # Hessian preparations
+    prep_Hes_L_u::Union{DifferentiationInterface.HessianPrep,Nothing}
+    prep_Hes_J_u::Union{DifferentiationInterface.HessianPrep,Nothing}
+
+    # Jacobian templates
+    Jac_h_u::SparseMatrixCSC{Float64,Int}
+
+    # Hessian templates
+    Hes_L_u::Union{SparseMatrixCSC{Float64,Int},Nothing}
+    Hes_J_u::Union{SparseMatrixCSC{Float64,Int},Nothing}
+
+    # Output templates
+    output_h_u::Vector{Float64}
 end
