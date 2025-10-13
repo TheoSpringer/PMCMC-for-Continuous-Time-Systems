@@ -128,13 +128,16 @@ function f_theta(theta::AbstractVector{<:Number},
 
     N = size(x, 2)
 
+    # In case Zygote is used for AD, we need to use a Zygote.Buffer to allow for in-place updates.
+    # x_next = Zygote.Buffer(similar(x))
+
     if x isa AbstractVecOrMat{<:JuMP.AbstractJuMPScalar}
         x_next = Array{JuMP.AbstractJuMPScalar}(undef, size(x)...)
     else
         x_next = similar(x)
     end
 
-    for i = 1:N
+    @inbounds for i = 1:N
         # Convert x and u from vector notation to the corresponding structs.
         state = SIMPLE_state(x[1, i], x[2, i], x[3, i])
         input = SIMPLE_input(u[1, i], u[2, i], u[3, i], 700.0)
@@ -143,34 +146,13 @@ function f_theta(theta::AbstractVector{<:Number},
         updated_state = step(parameters, state, input)
 
         # Convert the updated state back to a vector.
-        x_next[:, i] = [updated_state.mB; updated_state.tau; updated_state.I50B]
+        x_next[1, i] = updated_state.mB
+        x_next[2, i] = updated_state.tau
+        x_next[3, i] = updated_state.I50B
     end
+
+    # For Zygote, return a regular array instead of a Zygote.Buffer.
+    # return copy(x_next)
 
     return x_next
 end
-
-#=
-function f_theta(theta::AbstractVector{<:AbstractFloat},
-    x::AbstractVecOrMat{<:JuMP.AbstractJuMPScalar},
-    u::AbstractVecOrMat{<:JuMP.AbstractJuMPScalar})
-
-    parameters = SIMPLE_parameters(theta[1], theta[2], 6.0, 26.0, 1.00 * 1e-3, 100.0, 5.0, 32.0, 45.0, 0.07, 2.5, 0.95, 0.68)
-
-    N = size(x, 2)
-    x_next = Array{JuMP.AbstractJuMPScalar}(undef, size(x)...)
-
-    for i = 1:N
-        # Convert x and u from vector notation to the corresponding structs.
-        state = SIMPLE_state(x[1, i], x[2, i], x[3, i])
-        input = SIMPLE_input(u[1, i], u[2, i], u[3, i], 700.0)
-
-        # Update the state.
-        updated_state = step(parameters, state, input)
-
-        # Convert the updated state back to a vector.
-        x_next[:, i] = [updated_state.mB; updated_state.tau; updated_state.I50B]
-    end
-
-    return x_next
-end
-=#

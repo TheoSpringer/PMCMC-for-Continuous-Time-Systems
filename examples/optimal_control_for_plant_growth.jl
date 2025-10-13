@@ -32,7 +32,7 @@ Random.seed!(1)
 sampling_timer = time()
 
 # Learning parameters.
-K = Int(1e2) # number of PMCMC samples in final stage
+K = Int(10) # number of PMCMC samples in final stage
 K_pre_solve = 10 # number of samples used to pre-solve the OCP to get a good initial guess
 k_d = 0 # number of samples to be skipped to decrease correlation (thinning)
 K_b = 200 # length of burn-in period for each stage
@@ -175,17 +175,18 @@ profit(u, x, y) = revenue(x[1, end]) .- sum(cost_heating(u[1, :]) .- cost_radiat
 J(u, x, y) = -profit(u, x, y) # cost function to be minimized (negative profit)
 
 # Scenario dependent constraints for u, x, and y.
-h_scenario(u, x, y) = [0.0]
+h_scenario(u, x, y) = [zero(eltype(x)) * sum(x)]
 
 # Scenario independent constraints for the inputs u.
-h_u(u) = [
-    u[1, :] .- 35.0; # maximum temperature
-    0.0 .- u[1, :]; # minimum temperature
-    u[2, :] .- 1.0; # maximum drought index
-    0.0 .- u[2, :]; # minimum drought index
-    u[3, :] .- 35.0; # maximum radiation
-    0.0 .- u[3, :] # minimum radiation
-]
+h_u(u) = cat(
+    u[1, :] .- 35.0, # maximum temperature
+    .-u[1, :], # minimum temperature
+    u[2, :] .- 1.0, # maximum drought index
+    .-u[2, :], # minimum drought index
+    u[3, :] .- 35.0, # maximum radiation
+    .-u[3, :]; # minimum radiation
+    dims=1,
+)
 
 # Parameters for the OCP.
 H = 10 # time horizon in days

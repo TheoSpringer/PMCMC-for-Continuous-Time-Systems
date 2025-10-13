@@ -3,7 +3,7 @@
 function build_helpers(f_theta, g_theta, h_scenario, h_u, J, options::OCPOptions, dimensions::OCPDimensions)
     # Helper function that evaluates the dynamics constraints for the states over the whole horizon H for one scenario.
     function h_dynamics_x!(h_dyn_x::AbstractVector, U::AbstractMatrix, X_k::AbstractMatrix, theta::AbstractArray, V_k::AbstractMatrix)
-        for t in 1:dimensions.H-1
+        @inbounds for t in 1:dimensions.H-1
             h_dyn_x[(t-1)*dimensions.n_x+1:t*dimensions.n_x] .= f_theta(theta, X_k[:, t], U[:, t]) .+ V_k[:, t] .- X_k[:, t+1]
         end
         return h_dyn_x
@@ -17,7 +17,7 @@ function build_helpers(f_theta, g_theta, h_scenario, h_u, J, options::OCPOptions
 
     # Helper function that evaluates the dynamics constraints for the outputs over the whole horizon H for one scenario.
     function h_dynamics_y!(h_dyn_y::AbstractVector, U::AbstractMatrix, X_k::AbstractMatrix, Y_k::AbstractMatrix, theta::AbstractArray, W_k::AbstractMatrix)
-        for t in 1:dimensions.H
+        @inbounds for t in 1:dimensions.H
             h_dyn_y[(t-1)*dimensions.n_y+1:t*dimensions.n_y] .= g_theta(theta, X_k[:, t], U[:, t]) .+ W_k[:, t] .- Y_k[:, t]
         end
         return h_dyn_y
@@ -75,39 +75,45 @@ function build_helpers(f_theta, g_theta, h_scenario, h_u, J, options::OCPOptions
 
     if options.build_Hessian
         # Helper function that evaluates the local Lagrangian of the dynamics constraints for the states over the whole horizon H for one scenario.
-        function lagrangian_dynamics_x(z_scenario::AbstractVector, lambda::AbstractVector, theta::AbstractArray, V_k::AbstractMatrix)
-            h_dyn_x = Vector{eltype(z_scenario)}(undef, dimensions.n_x * (dimensions.H - 1))
-            h_dynamics_x!(h_dyn_x, z_scenario, theta, V_k)
-            return dot(lambda, h_dyn_x)
+        function lagrangian_dynamics_x(z_scenario::AbstractVector, lambda_x::AbstractVector, theta::AbstractArray, V_k::AbstractMatrix)
+            U, X_k = unpack_z_scenario(z_scenario, options, dimensions)[1:2]
+            L_x = zero(eltype(z_scenario))
+            @inbounds for t in 1:dimensions.H-1
+                h_x = f_theta(theta, X_k[:, t], U[:, t]) .+ V_k[:, t] .- X_k[:, t+1]
+                L_x += dot(lambda_x[(t-1)*dimensions.n_x+1:t*dimensions.n_x], h_x)
+            end
+            return L_x
         end
 
         # Helper function that evaluates the local Lagrangian of the dynamics constraints for the outputs over the whole horizon H for one scenario.
-        function lagrangian_dynamics_y(z_scenario::AbstractVector, lambda::AbstractVector, theta::AbstractArray, W_k::AbstractMatrix)
-            h_dyn_y = Vector{eltype(z_scenario)}(undef, dimensions.n_y * dimensions.H)
-            h_dynamics_y!(h_dyn_y, z_scenario, theta, W_k)
-            return dot(lambda, h_dyn_y)
+        function lagrangian_dynamics_y(z_scenario::AbstractVector, lambda_y::AbstractVector, theta::AbstractArray, W_k::AbstractMatrix)
+            U, X_k, Y_k = unpack_z_scenario(z_scenario, options, dimensions)[1:3]
+            L_y = zero(eltype(z_scenario))
+            @inbounds for t in 1:dimensions.H-1
+                h_y = g_theta(theta, X_k[:, t], U[:, t]) .+ W_k[:, t] .- Y_k[:, t]
+                L_y += dot(lambda_y[(t-1)*dimensions.n_y+1:t*dimensions.n_y], h_y)
+            end
+            return L_y
         end
 
         # Helper function that evaluates the local Lagrangian of the scenario constraints for one scenario.
-        function lagrangian_scenario(z_scenario::AbstractVector, lambda::AbstractVector)
-            h = Vector{eltype(z_scenario)}(undef, length(dimensions.n_h_scenario))
-            h_scenario!(h, z_scenario)
-            return dot(lambda, h)
+        function lagrangian_scenario(z_scenario::AbstractVector, lambda_scenario::AbstractVector)
+            U, X_k, Y_k = unpack_z_scenario(z_scenario, options, dimensions)[1:3]
+            return dot(lambda_scenario, h_scenario(U, X_k, Y_k))
         end
 
         # Helper function that evaluates the local Lagrangian of h_u.
-        function lagrangian_u(U_vec::AbstractVector, lambda::AbstractVector)
-            h = Vector{eltype(U_vec)}(undef, dimensions.n_h_u)
-            h_u!(h, U_vec)
-            return dot(lambda, h)
+        function lagrangian_u(U_vec::AbstractVector, lambda_u::AbstractVector)
+            U = @views reshape(U_vec, dimensions.n_u, dimensions.H)
+            return dot(lambda_u, h_u(U))
         end
 
         if !options.J_u
             # Helper function that evaluates the local Lagrangian of the epigraph constraint J_max.
-            function lagrangian_J_max(z_scenario::AbstractVector, lambda::AbstractVector)
-                h = Vector{eltype(z_scenario)}(undef, 1)
-                h_J_max!(h, z_scenario)
-                return dot(lambda, h)
+            function lagrangian_J_max(z_scenario::AbstractVector, lambda_J_max::AbstractVector)
+                U, X_k, Y_k, J_max = unpack_z_scenario(z_scenario, options, dimensions)
+                h_J_max = J(U, X_k, Y_k) .- J_max
+                return dot(lambda_J_max, h_J_max)
             end
         else
             lagrangian_J_max = nothing
