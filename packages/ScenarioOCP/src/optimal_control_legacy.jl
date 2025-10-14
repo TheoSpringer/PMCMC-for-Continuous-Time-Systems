@@ -260,7 +260,7 @@ function solve_PMCMC_OCP(PMCMC_samples::Vector{PMCMC_sample}, f_theta::Function,
 end
 
 """
-    solve_PG_OCP_greedy_guarantees(PMCMC_samples::Vector{PMCMC_sample}, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, H, J::Function, h_scenario::Function, h_u::Function, β; J_u=false, X_t=nothing, V=nothing, W=nothing, U_init=nothing, PMCMC_samples_pre_solve=nothing, K_warmup=0, delta_tol=1e-6, solver_opts=nothing, print_progress=true)
+    solve_PMCMC_OCP_greedy_guarantees(PMCMC_samples::Vector{PMCMC_sample}, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, H, J::Function, h_scenario::Function, h_u::Function, β; J_u=false, X_t=nothing, V=nothing, W=nothing, U_init=nothing, PMCMC_samples_pre_solve=nothing, K_warmup=0, delta_tol=1e-6, solver_opts=nothing, print_progress=true)
 
 Solve the sample-based optimal control problem using Ipopt and determine a support sub-sample with cardinality s via a greedy constraint removal.
 Based on the cardinality s, a bound on the probability that the incurred cost exceeds the worst-case cost or that the constraints are violated when the input trajectory u_{0:H} is applied to the unknown system is calculated.
@@ -313,7 +313,7 @@ h(&u_{0:H},x_{0:H}^{[k]},y_{0:H}^{[k]}) \\leq 0.
 - `time_guarantees`: time it took to compute the guarantees
 - `num_failed_optimizations`: number of failed optimizations during the computation of the guarantees
 """
-function solve_PG_OCP_greedy_guarantees(PMCMC_samples::Vector{PMCMC_sample}, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, H, J::Function, h_scenario::Function, h_u::Function, β::AbstractFloat; J_u=false, X_t=nothing, V=nothing, W=nothing, U_init=nothing, PMCMC_samples_pre_solve=nothing, K_warmup=0, delta_tol=1e-6, solver_opts=nothing, print_progress=true)
+function solve_PMCMC_OCP_greedy_guarantees(PMCMC_samples::Vector{PMCMC_sample}, n_x, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, H, J::Function, h_scenario::Function, h_u::Function, β::AbstractFloat; J_u=false, X_t=nothing, V=nothing, W=nothing, U_init=nothing, PMCMC_samples_pre_solve=nothing, K_warmup=0, delta_tol=1e-6, solver_opts=nothing, print_progress=true)
     # Time first optimization.
     first_solve_timer = time()
 

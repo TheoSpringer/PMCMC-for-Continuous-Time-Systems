@@ -1,0 +1,7 @@
+name = "ScenarioBase"
+uuid = "e35946d3-6c8d-41f1-ac01-57f5332e93ea"
+authors = ["Robert Lefringhausen <robert.lefringhausen@tum.de>"]
+version = "0.1.0"
+
+[deps]
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"

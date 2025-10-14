@@ -1,15 +1,12 @@
-using Revise
 using LinearAlgebra
 using Random
 using Distributions
 using Plots
-using StatsPlots
 using Printf
-using Base.Threads
 using JLD2
-using JuMP
 
-using PMCMCopt
+using ScenarioPMCMC
+using ScenarioOCP
 
 include("SIMPLE/SIMPLE.jl")
 include("TOMGRO/TOMGRO.jl")
@@ -142,31 +139,31 @@ ylabel!("u | y")
 
 # Run a staged PMMH sampler.
 # Aim for an acceptance ratio of around 20–30% for a random-walk proposal.
-PMMH_samples, acceptance_ratio, time_sampling = PMCMCopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
+PMMH_samples, acceptance_ratio, time_sampling = staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
 
 # In case the parameters theta and the initial state are highly correlated, e.g., due to small process noise, it may be beneficial to use a blocked PMMH sampler.
 #=
 proposal_cov_init = Diagonal(vcat(theta_var, x_0_var)) # initial proposal covariance for theta and x_0
-PMMH_samples, acceptance_ratio, time_sampling = PMCMCopt.staged_PMMH_blocked(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_v_theta, log_pdf_w_theta, log_pdf_theta, log_pdf_x_0, theta_init, x_0_init, proposal_cov_init, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
+PMMH_samples, acceptance_ratio, time_sampling = staged_PMMH_blocked(u_training, y_training, n_x, K, K_b, k_d, N_init, f_theta, g_theta, sample_v_theta, log_pdf_w_theta, log_pdf_theta, log_pdf_x_0, theta_init, x_0_init, proposal_cov_init, T_chunk, K_stage, alpha; regularizer=regularizer, K_adapt=10)
 =#
 
 # Simulate the posterior models forward and compare to test data.
 # The predicted trajectories should track the true outputs well.
-PMCMCopt.test_prediction(PMMH_samples, n_x, f_theta, g_theta, sample_v_theta, sample_w_theta, 1, u_test, y_test)
+test_prediction(PMMH_samples, n_x, f_theta, g_theta, sample_v_theta, sample_w_theta, 1, u_test, y_test)
 
 # Plot the autocorrelation function (ACF) of the samples.
 # A well-mixed chain will show fast decay of autocorrelation. After thinning, the ACF should be near zero even at small lags.
-PMCMCopt.plot_autocorrelation(PMMH_samples; max_lag=200)
+plot_autocorrelation(PMMH_samples; max_lag=200)
 
 # Compute the effective sample size (ESS).
 # The ESS indicates how many effectively independent samples were drawn. Ideally, after thinning, ESS should approach K.
 # The goal of tuning is to maximize the ESS per second.
-ess = PMCMCopt.compute_ess(PMMH_samples; max_lag=200)
+ess = compute_ess(PMMH_samples; max_lag=200)
 @printf("Minimum ESS: %.1f (= %.2f / s)\n", minimum(ess), minimum(ess) / time_sampling)
 
 # Plot the parameter and latent state trace.
 # The trace should appear stationary and show no long-term trends after burn-in. Jump sizes should look reasonable.
-PMCMCopt.plot_parameter_trace(PMMH_samples)
+plot_parameter_trace(PMMH_samples)
 
 # Plot the posterior histogram with overlaid priors and true values (if known).
 # If the data is informative, the posterior should be tighter than the prior and centered near the true value.
@@ -181,7 +178,7 @@ for i in 1:length(x_0_mean)
     values = range(quantile(prior, 0.01), stop=quantile(prior, 0.99), length=500)
     push!(prior_pdf, (values, pdf(prior, values)))
 end
-PMCMCopt.plot_parameter_pdf(PMMH_samples; bins=50, prior_pdf=prior_pdf, true_values=[theta_true; x_training[:, 1]])
+plot_parameter_pdf(PMMH_samples; bins=50, prior_pdf=prior_pdf, true_values=[theta_true; x_training[:, 1]])
 
 # Optional: run multiple independent PMMH chains and compute the Gelman–Rubin statistic.
 # R̂ quantifies convergence by comparing within-chain to between-chain variance.
@@ -191,9 +188,9 @@ M = 10 # number of independent chains
 PMCMC_chains = Vector{Vector{PMCMC_sample}}(undef, M)
 @threads for m in 1:M
     theta_init = rand(MvNormal(theta_mean, Diagonal(theta_var)))
-    PMCMC_chains[m] = PMCMCopt.staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer)[1]
+    PMCMC_chains[m] = staged_PMMH(u_training, y_training, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, theta_init, theta_cov, T_chunk, K_stage, alpha; regularizer=regularizer)[1]
 end
 
-R_hat = PMCMCopt.compute_gelman_rubin(PMCMC_chains)
+R_hat = compute_gelman_rubin(PMCMC_chains)
 @printf("Maximum R̂: %.2f\n", maximum(R_hat))
 =#
