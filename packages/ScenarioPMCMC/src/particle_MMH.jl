@@ -1,3 +1,4 @@
+using Printf: @printf
 """
     particle_MMH(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:AbstractFloat}, n_x::Int, K::Int, K_b::Int, k_d::Int, N::Int, f_theta::Function, g_theta::Function, sample_x_0::Function, sample_v_theta::Function, log_pdf_w_theta::Function, log_pdf_theta::Function, propose_theta::Function, log_ratio_proposal_pdf::Function, theta_init::AbstractVector{<:AbstractFloat}; print_progress=true)
 
@@ -50,12 +51,27 @@ function particle_MMH(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:Ab
     theta = theta_init
     log_likelihood = -Inf
     log_p_theta = -Inf
-
+    # Progress state (INIT THESE!)
+    last_pct    = -1
+    last_report = time()
+    # Small helper to print one status line
+    report!() = begin
+        pct = Int(floor(accepted_samples * 100 / K_total))
+        Printf.@printf("\rPMMH progress: %3d%%  accepted %d/%d  proposals %d  acc-rate %.1f%%",
+                        pct, accepted_samples, K_total, n_proposals,
+                       n_proposals > 0 ? 100 * accepted_samples / n_proposals : 0.0)
+        flush(stdout)
+        last_pct = pct
+        last_report = time()
+        nothing
+    end
     # Time PMMH sampler.
     sampling_timer = time()
 
     if print_progress
         println("### Started PMMH sampling")
+        print("PMMH progress:   0%  accepted 0/$(K_total)  proposals 0  acc-rate 0.0%")
+        flush(stdout)
     end
 
     while accepted_samples < K_total
@@ -64,6 +80,13 @@ function particle_MMH(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:Ab
         theta_prop = propose_theta(theta)
         log_p_theta_prop = log_pdf_theta(theta_prop)[]
         if !isfinite(log_p_theta_prop)
+            if print_progress && (n_proposals % 50 == 0)
+                pct = Int(floor(accepted_samples * 100 / K_total))
+                @printf("\rPMMH progress: %3d%%  accepted %d/%d  proposals %d  acc-rate %.1f%%",
+                        pct, accepted_samples, K_total, n_proposals,
+                        n_proposals > 0 ? 100 * accepted_samples / n_proposals : 0.0)
+                flush(stdout)
+            end
             continue
         end
 
@@ -98,17 +121,25 @@ function particle_MMH(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:Ab
                 end
                 current_sample += 1
             end
+        end
 
             # Print progress.
             if print_progress
-                @printf("\e[32m%i/%i samples accepted\e[0m\n", accepted_samples, K_total)
-            end
-        else
-            # Print progress.
-            if print_progress
-                @printf("\e[31m%i/%i samples accepted\e[0m\n", accepted_samples, K_total)
+            now = time()
+            pct = Int(floor(accepted_samples * 100 / K_total))
+            if pct != last_pct || (now - last_report) > 0.25 || (n_proposals % 50 == 0)
+                @printf("\rPMMH progress: %3d%%  accepted %d/%d  proposals %d  acc-rate %.1f%%",
+                        pct, accepted_samples, K_total, n_proposals,
+                        n_proposals > 0 ? 100 * accepted_samples / n_proposals : 0.0)
+                flush(stdout)
+                last_pct = pct
+                last_report = now
             end
         end
+    end
+
+    if print_progress
+        println()  # newline after the progress line
     end
 
     time_sampling = time() - sampling_timer
@@ -163,7 +194,7 @@ function staged_PMMH(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:Abs
     n_theta = length(theta_init)
     T = size(y, 2)
 
-    # Determine the number of stages (each stage adds T_chunk data points)
+    # Determine the number of stages (each stage adds T_chunk       data points)
     N_stages = ceil(Int, T / T_chunk)
 
     # Initialize current parameter vector
@@ -190,7 +221,10 @@ function staged_PMMH(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:Abs
         T_i = min(i * T_chunk, T)
         u_i = u[:, 1:T_i]
         y_i = y[:, 1:T_i]
-
+        if print_progress
+            @printf("\n-- Stage %d/%d (using 1..%d points) [%.0f%%] --\n",
+                    i, N_stages, T_i, 100 * i / N_stages)
+        end
         # Define the proposal function as sampling from a multivariate normal.
         propose_theta(theta) = rand(MvNormal(theta, proposal_cov))
         log_ratio_proposal_pdf(theta_accepted, theta_prop) = 0
@@ -198,10 +232,10 @@ function staged_PMMH(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:Abs
         # Call the base PMMH sampler.
         if i < N_stages
             # For intermediate stages, sample K_stage samples without thinning.
-            PMMH_samples_stage, acceptance_ratio_stage = particle_MMH(u_i, y_i, n_x, K_stage, K_b, 0, N, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, propose_theta, log_ratio_proposal_pdf, theta; print_progress=false)[1:2]
+            PMMH_samples_stage, acceptance_ratio_stage = particle_MMH(u_i, y_i, n_x, K_stage, K_b, 0, N, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, propose_theta, log_ratio_proposal_pdf, theta; print_progress=true)[1:2]
         else
             # In the final stage, sample K samples with thinning parameter k_d.
-            PMMH_samples_stage, acceptance_ratio_stage = particle_MMH(u_i, y_i, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, propose_theta, log_ratio_proposal_pdf, theta; print_progress=false)[1:2]
+            PMMH_samples_stage, acceptance_ratio_stage = particle_MMH(u_i, y_i, n_x, K, K_b, k_d, N, f_theta, g_theta, sample_x_0, sample_v_theta, log_pdf_w_theta, log_pdf_theta, propose_theta, log_ratio_proposal_pdf, theta; print_progress=true)[1:2]
         end
 
         # Save stage samples and acceptance ratio.
@@ -245,5 +279,5 @@ function staged_PMMH(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<:Abs
             time_sampling, average_acceptance_ratio)
     end
 
-    return PMMH_samples, acceptance_ratio, time_sampling
+    return PMMH_samples, acceptance_ratio, time_sampling 
 end

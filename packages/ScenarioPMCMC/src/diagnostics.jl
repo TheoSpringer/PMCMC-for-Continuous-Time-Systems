@@ -1,3 +1,28 @@
+const THESIS_TITLE_FSIZE  = 28   # plot title
+const THESIS_LABEL_FSIZE  = 22   # x/y labels (guides)
+const THESIS_TICK_FSIZE   = 18   # tick labels
+const THESIS_LEGEND_FSIZE = 22   # legend text
+const THESIS_LW           = 5    # line width
+const THESIS_MS           = 10   # marker size
+
+using Printf: @printf
+using StatsBase: Weights, sample, autocor
+using Statistics: mean
+using Plots
+const COL_POST   = :blue       # primary: posterior / trace / signed density bars
+const COL_BAND   = :lightblue  # bands / envelopes / "all predictions"
+const COL_PRIOR  = :green      # prior curve
+const COL_TRUE   = :red        # true value / true output
+const COL_ZERO   = :black      # baseline y=0 for signed density
+
+# Opacities + widths
+const ALPHA_POST = 0.25        # posterior fill (instrumental)
+const ALPHA_SIGN = 0.30        # signed density bars
+const ALPHA_BAND = 0.20        # prediction envelopes / percentile bands
+const ALPHA_PRI  = 0.85        # prior curve
+const LW_PRI     = max(2, Int(round(0.70 * THESIS_LW)))
+const LW_TRUE    = max(2, Int(round(1.20 * THESIS_LW)))
+const LW_MAIN    = THESIS_LW
 """
     compute_ess(PMCMC_samples::Vector{PMCMC_sample}; max_lag::Int=100)
 
@@ -10,7 +35,7 @@ Compute the effective sample size (ESS) for each parameter and state.
 # Returns
 - `ess`: vector of ESS estimates for all variables.
 """
-function compute_ess(PMCMC_samples::Vector{PMCMC_sample}; max_lag::Int=100)
+function compute_ess(PMCMC_samples::AbstractVector; max_lag::Int=100)
     # Get number of models.
     K = size(PMCMC_samples, 1)
 
@@ -58,7 +83,7 @@ Compute the Gelman–Rubin statistic for each parameter and latent state from a 
 # Returns
 - `R_hat`: vector of R̂ values, one for each variable
 """
-function compute_gelman_rubin(PMCMC_chains::Vector{Vector{PMCMC_sample}})
+function compute_gelman_rubin(PMCMC_chains::AbstractVector{<:AbstractVector})
     M = length(PMCMC_chains) # Number of chains
     K = length(PMCMC_chains[1]) # Number of samples per chain
 
@@ -114,10 +139,16 @@ Simulate the PMCMC samples forward in time and compare the predictions to the te
 - `sample_v_theta`: function that returns N samples from the process noise distribution parametrized by theta; has input (theta, N)
 - `sample_w_theta`: function that returns N samples from the measurement noise distribution parametrized by theta; has input (theta, N)
 - `k_n`: each model is simulated ``k_n`` times
-- `u_test`: test input
+- `u_test`: test inputs
 - `y_test`: test output
 """
-function test_prediction(PMCMC_samples::Vector{PMCMC_sample}, n_x::Int, f_theta::Function, g_theta::Function, sample_v_theta::Function, sample_w_theta::Function, k_n::Int, u_test::AbstractMatrix{<:AbstractFloat}, y_test::AbstractMatrix{<:AbstractFloat})
+function test_prediction(PMCMC_samples::AbstractVector, n_x::Int,
+    f_theta::Function, g_theta::Function, sample_v_theta::Function,
+    sample_w_theta::Function, k_n::Int, u_test::AbstractMatrix{<:AbstractFloat},
+    y_test::AbstractMatrix{<:AbstractFloat};
+    t_abs::Union{Nothing,AbstractVector{<:Real}}=nothing,
+    t_cont::Union{Nothing,AbstractVector{<:Real}}=nothing,
+    y_cont::Union{Nothing,AbstractMatrix{<:AbstractFloat}}=nothing)
     println("### Testing model")
 
     # Get number of models, etc.
@@ -168,11 +199,11 @@ function test_prediction(PMCMC_samples::Vector{PMCMC_sample}, n_x::Int, f_theta:
 
     println("### Testing complete")
 
-    # Plot results.
-    plot_predictions(y_test_sim, y_test; plot_percentiles=true)
+    # Plot with absolute-time axis + optional continuous truth
+    plot_predictions(y_test_sim, y_test; plot_percentiles=true,
+                        t=t_abs, t_cont=t_cont, y_cont=y_cont)
 
-    # Compute and print RMSE.
-    mean_rmse = sqrt(mean((y_test_sim .- repeat(y_test, 1, 1, K * k_n)) .^ 2))
+    mean_rmse = sqrt(mean((y_test_sim .- repeat(y_test, 1, 1, size(y_test_sim,3))) .^ 2))
     @printf("Mean RMSE: %.2f\n", mean_rmse)
 end
 
@@ -188,45 +219,68 @@ Plot the predictions and the test data.
 - `y_min`: min output to be plotted as constraint
 - `y_max`: max output to be plotted as constraint
 """
-function plot_predictions(y_pred::AbstractArray, y_test::AbstractMatrix{<:AbstractFloat}; plot_percentiles::Bool=false, y_min::Union{Nothing,AbstractMatrix{<:AbstractFloat}}=nothing, y_max::Union{Nothing,AbstractMatrix{<:AbstractFloat}}=nothing)
-    # Get prediction horizon and number of outputs.
+function plot_predictions(
+    y_pred::AbstractArray, y_test::AbstractMatrix{<:AbstractFloat};
+    plot_percentiles::Bool=false,
+    y_min::Union{Nothing,AbstractMatrix{<:AbstractFloat}}=nothing,
+    y_max::Union{Nothing,AbstractMatrix{<:AbstractFloat}}=nothing,
+    t::Union{Nothing,AbstractVector{<:Real}}=nothing,
+    t_cont::Union{Nothing,AbstractVector{<:Real}}=nothing,
+    y_cont::Union{Nothing,AbstractMatrix{<:AbstractFloat}}=nothing
+)
     T_pred = size(y_test, 2)
-    n_y = size(y_pred, 1)
+    n_y    = size(y_pred, 1)
+    x = isnothing(t) ? collect(0:T_pred-1) :
+        (length(t) == T_pred ? t :
+            throw(ArgumentError("length(t) must equal size(y_test,2) (= $T_pred)")))
 
-    # Plot the predictions and the test data for all output dimensions.
     for i = 1:n_y
-        # Calculate median, mean, maximum, and minimum prediction.
-        y_pred_med = median(y_pred, dims=3)[i, :, 1]
         y_pred_mean = mean(y_pred, dims=3)[i, :, 1]
+        y_pred_max  = maximum(y_pred, dims=3)[i, :, 1]
+        y_pred_min  = minimum(y_pred, dims=3)[i, :, 1]
+        y_pred_09   = mapslices(v -> quantile(v, 0.9), y_pred, dims=3)[i, :, 1]
+        y_pred_01   = mapslices(v -> quantile(v, 0.1), y_pred, dims=3)[i, :, 1]
 
-        y_pred_max = maximum(y_pred, dims=3)[i, :, 1]
-        y_pred_min = minimum(y_pred, dims=3)[i, :, 1]
+        # Big + thick for thesis
+        p = plot(
+                x, y_pred_min;
+                fillrange      = y_pred_max,
+                alpha          = ALPHA_BAND,
+                lc             = COL_BAND,
+                label          = "all predictions",
+                legend         = :topleft,
+                legendfontsize = THESIS_LEGEND_FSIZE,
+                guidefontsize  = THESIS_LABEL_FSIZE,
+                tickfontsize   = THESIS_TICK_FSIZE,
+                titlefontsize  = THESIS_TITLE_FSIZE,
+                lw             = LW_MAIN,
+            )
 
-        # Calculate percentiles.
-        y_pred_09 = mapslices(x -> quantile(x, 0.9), y_pred, dims=3)[i, :, 1]
-        y_pred_01 = mapslices(x -> quantile(x, 0.1), y_pred, dims=3)[i, :, 1]
-
-        # Plot range of predictions.
-        p = plot(Array(0:T_pred-1), y_pred_min, fillrange=y_pred_max, alpha=0.35, label="all predictions", legend=:topleft)
-
-        # Plot percentiles.
         if plot_percentiles
-            plot!(Array(0:T_pred-1), y_pred_01, fillrange=y_pred_09, alpha=0.35, label="10% perc. - 90% perc.")
+            plot!(p, x, y_pred_01;
+                fillrange = y_pred_09,
+                alpha     = ALPHA_BAND,
+                lc        = COL_BAND,
+                label     = "10%–90% perc.",
+                lw        = LW_MAIN)
         end
 
-        # Plot true output.
-        plot!(Array(0:T_pred-1), y_test[i, :], label="true output", lw=2)
+        plot!(p, x, y_test[i, :];
+                lc    = COL_TRUE,
+                label = "true output",
+                lw    = LW_MAIN)
 
-        # Plot median/mean prediction.
-        # plot!(Array(0:T_pred-1), y_pred_med, label="median prediction", lw=2)
-        plot!(Array(0:T_pred-1), y_pred_mean, label="mean prediction", lw=2)
+        plot!(p, x, y_pred_mean;
+                lc    = COL_POST,
+                label = "mean prediction",
+                lw    = LW_MAIN)
 
-        # Plot constraints.
-        if y_min !== nothing
-            plot!(Array(0:T_pred-1), y_min[i, :], fillrange=minimum([y_pred_min; y_test']) * ones(T_pred), fillcolor=:red, alpha=0.35, label="constraints", legend=:topleft)
-        end
-        if y_max !== nothing
-            plot!(Array(0:T_pred-1), y_max[i, :], fillrange=maximum([y_pred_max; y_test']) * ones(T_pred), fillcolor=:red, alpha=0.35, label="constraints")
+        if t_cont !== nothing && y_cont !== nothing
+            @assert size(y_cont,1) == n_y
+            plot!(p, t_cont, vec(y_cont[i, :]);
+                lw    = LW_MAIN,
+                lc    = COL_TRUE,
+                label = "true y_$i (continuous)")
         end
 
         title!("\$y_{$i}\$: predicted output vs. true output")
@@ -236,149 +290,757 @@ function plot_predictions(y_pred::AbstractArray, y_test::AbstractMatrix{<:Abstra
     end
 end
 
-"""
-    plot_autocorrelation(PMCMC_samples::Vector{PMCMC_sample}; max_lag=0)
+function plot_autocorrelation(PMCMC_samples::AbstractVector;
+                              max_lag::Int = 100,
+                              signs::Union{Nothing,AbstractVector{<:Real}} = nothing,
+                              burn::Int = 0,
+                              state_summary::Symbol = :mean,   # :mean or :sample
+                              signed_mode::Symbol = :contribution) # :none or :contribution
 
-Plot the autocorrelation function (ACF) of the PMCMC samples. This might be helpful when adjusting the thinning parameter ``k_d``.
+    K = length(PMCMC_samples)
+    i0 = max(1, burn + 1)
+    Kuse = K - (i0 - 1)
+    @assert Kuse >= 3 "Need ≥3 samples after burn-in."
 
-# Arguments
-- `PMCMC_samples`: PMCMC samples
-- `max_lag`: maximum lag at which to calculate the ACF
-"""
-function plot_autocorrelation(PMCMC_samples::Vector{PMCMC_sample}; max_lag::Int=100)
-    # Get number of models.
-    K = size(PMCMC_samples, 1)
+    nθ = length(PMCMC_samples[1].theta)
+    nx = size(PMCMC_samples[1].x_m1, 1)
+    n_variables = nθ + nx
 
-    # Get number of parameters of the PMCMC samples.
-    n_variables = length(PMCMC_samples[1].theta) + size(PMCMC_samples[1].x_m1, 1)
+    # Build series matrix: rows=time, cols=variables
+    X = Array{Float64}(undef, Kuse, n_variables)
 
-    # Fill matrix with the series of the parameters of the PMCMC samples.
-    sample_matrix = Array{Float64}(undef, K, n_variables)
-    for i in 1:K
-        # Sample state at the last timestep of the training dataset.
-        star = sample(1:length(PMCMC_samples[i].w_m1), Weights(PMCMC_samples[i].w_m1))
-        x_m1 = PMCMC_samples[i].x_m1[:, star]
-        sample_matrix[i, :] .= [PMCMC_samples[i].theta; vec(x_m1)]
+    for (row, i) in enumerate(i0:K)
+        # state summary at last training time
+        if state_summary === :mean
+            w = PMCMC_samples[i].w_m1
+            w = w ./ sum(w)
+            x_m1 = PMCMC_samples[i].x_m1 * w
+        else
+            star = sample(1:length(PMCMC_samples[i].w_m1), Weights(PMCMC_samples[i].w_m1))
+            x_m1 = PMCMC_samples[i].x_m1[:, star]
+        end
+        X[row, :] .= [PMCMC_samples[i].theta; vec(x_m1)]
     end
 
-    # Calculate the autocorrelation.
-    autocorrelation = autocor(sample_matrix, Array(0:max_lag); demean=true)
+    # Don't go crazy with lag: large lags are just noise
+    L = min(max_lag, max(5, Int(floor(Kuse/4))))
+    lags = collect(0:L)
 
-    # Plot the ACF.
-    p = plot(yticks=-1:0.1:1)
-    for i in 1:n_variables
-        if i == 1
-            # Plot the ACF of the elements of theta.
-            plot!(Array(0:max_lag), autocorrelation[:, i], lc=:red, lw=2, label="\$\\theta\$")
-        elseif 1 < i <= length(PMCMC_samples[1].theta)
-            plot!(Array(0:max_lag), autocorrelation[:, i], lc=:red, lw=2, label="")
-        elseif i == length(PMCMC_samples[1].theta) + 1
-            # Plot the ACF of the elements of x_t-1.
-            plot!(Array(0:max_lag), autocorrelation[:, i], lc=:green, lw=2, label="\$x(t-1)\$")
-        elseif length(PMCMC_samples[1].theta) + 1 < i
-            plot!(Array(0:max_lag), autocorrelation[:, i], lc=:green, lw=2, label="")
+    # ACF
+    if signs === nothing || signed_mode === :none
+        acf_mat = autocor(X, lags; demean=true)
+        title_str = "Autocorrelation"
+        ylab = "ACF"
+    else
+        @assert length(signs) == K "signs must align with PMCMC_samples."
+        s = Float64.(signs[i0:Kuse + i0 - 1])  # length Kuse
+        Z = X .* reshape(s, :, 1)              # signed contributions
+        acf_mat = autocor(Z, lags; demean=true)
+        title_str = "Signed-contribution autocorrelation"
+        ylab = "ACF of (sign × value)"
+    end
+
+    # Plot (use fewer yticks; your -1:0.1:1 + huge font makes a black blob)
+    p = plot(
+        legend=:topleft,
+        legendfontsize=THESIS_LEGEND_FSIZE,
+        guidefontsize=THESIS_LABEL_FSIZE,
+        tickfontsize=THESIS_TICK_FSIZE,
+        titlefontsize=THESIS_TITLE_FSIZE,
+        xlabel="Lag",
+        ylabel=ylab,
+        title=title_str,
+        yticks=-1:0.5:1
+    )
+
+    for j in 1:n_variables
+        if j == 1
+            plot!(lags, acf_mat[:, j], lc=COL_POST, lw=LW_MAIN, label="\$\\theta\$")
+        elseif 1 < j <= nθ
+            plot!(lags, acf_mat[:, j], lc=COL_POST, lw=LW_MAIN, label="")
+        elseif j == nθ + 1
+            plot!(lags, acf_mat[:, j], lc=COL_TRUE, lw=LW_MAIN, label="\$x(t-1)\$")
+        else
+            plot!(lags, acf_mat[:, j], lc=COL_TRUE, lw=LW_MAIN, label="")
         end
     end
 
-    title!("Autocorrelation Function (AFC)")
-    xlabel!("Lag")
-    ylabel!("AFC")
     display(p)
+    return acf_mat
 end
 
-"""
-    plot_parameter_trace(PMCMC_samples::Vector{PMCMC_sample})
-Plot the trace of the parameters of the PMCMC samples.
-# Arguments
-- `PMCMC_samples`: PMCMC samples
-"""
-function plot_parameter_trace(PMCMC_samples::Vector{PMCMC_sample})
-    # Get number of models.
-    K = size(PMCMC_samples, 1)
+function plot_parameter_trace(PMCMC_samples::AbstractVector;
+                              signs::Union{Nothing,AbstractVector{<:Real}}=nothing,
+                              burn::Int=0)
 
-    # Get number of parameters of the PMCMC samples.
-    n_variables = length(PMCMC_samples[1].theta) + size(PMCMC_samples[1].x_m1, 1)
+    K = length(PMCMC_samples)
+    @assert K >= 1 "Need at least one PMCMC sample."
 
-    # Fill matrix with the series of the parameters of the PMCMC samples.
+    θlen = length(PMCMC_samples[1].theta)
+    xdim = size(PMCMC_samples[1].x_m1, 1)
+    n_variables = θlen + xdim
+
+    # Sample one x_m1 per iteration from PF weights at last training time
     sample_matrix = Array{Float64}(undef, K, n_variables)
     for i in 1:K
-        # Sample state at the last timestep of the training dataset.
         star = sample(1:length(PMCMC_samples[i].w_m1), Weights(PMCMC_samples[i].w_m1))
         x_m1 = PMCMC_samples[i].x_m1[:, star]
         sample_matrix[i, :] .= [PMCMC_samples[i].theta; vec(x_m1)]
     end
 
-    # Plot the trace of the parameters.
+    i0 = max(1, burn + 1)
+    iters = collect(0:(K-1))
+    iters_view = @view iters[i0:end]
+    Smat = @view sample_matrix[i0:end, :]
+
+    if !isnothing(signs)
+        @assert length(signs) == K "signs must align with stored PMCMC_samples (same length)."
+        Ssign = collect(@view signs[i0:end])
+        pos = findall(>(0), Ssign)
+        neg = findall(<(0), Ssign)
+    else
+        Ssign = nothing
+        pos = Int[]
+        neg = Int[]
+    end
+
     for i in 1:n_variables
-        p = plot(Array(0:K-1), sample_matrix[:, i], lw=2, legend=false)
-        if i <= length(PMCMC_samples[1].theta)
+        y = vec(@view Smat[:, i])
+
+        p = plot(
+            iters_view, y;
+            lw            = THESIS_LW,
+            legend        = false,
+            guidefontsize = THESIS_LABEL_FSIZE,
+            tickfontsize  = THESIS_TICK_FSIZE,
+            titlefontsize = THESIS_TITLE_FSIZE,
+        )
+
+        if !isnothing(Ssign)
+            # Overlay markers where sign is + or -
+            if !isempty(pos)
+                scatter!(p, iters_view[pos], y[pos];
+                         ms=THESIS_MS, label="sign=+")
+            end
+            if !isempty(neg)
+                scatter!(p, iters_view[neg], y[neg];
+                         ms=THESIS_MS, markershape=:x, label="sign=-")
+            end
+            plot!(p; legend=:topright, legendfontsize=THESIS_LEGEND_FSIZE)
+        end
+
+        if i <= θlen
             title!("Trace of \$\\theta_{$i}\$")
             ylabel!("\$\\theta_{$i}\$")
         else
-            title!("Trace of \$x_{$(i-length(PMCMC_samples[1].theta))}\$")
-            ylabel!("\$x_{$(i-length(PMCMC_samples[1].theta))}(t-1)\$")
+            idx = i - θlen
+            title!("Trace of \$x_{$idx}\$")
+            ylabel!("\$x_{$idx}(t-1)\$")
         end
+
         xlabel!("Iteration")
         display(p)
     end
+
+    return nothing
 end
 
-"""
-    plot_parameter_pdf(PMCMC_samples::Vector{PMCMC_sample}; bins = 50, prior_pdf::Union{Nothing,Vector{Tuple{Vector{Float64},Vector{Float64}}}}=nothing, true_values=nothing)
+# -----------------------------------------------------------------------------
+# Signed (ratio) mean helper
+# -----------------------------------------------------------------------------
+@inline function signed_mean_scalar(x::AbstractVector{<:Real},
+                                    s::AbstractVector{<:Real})
+    @assert length(x) == length(s)
+    denom = sum(Float64.(s))
+    if abs(denom) < 1e-12
+        return mean(Float64.(x)), denom
+    end
+    return sum(Float64.(s) .* Float64.(x)) / denom, denom
+end
 
-Plots an histogram (empirical probability density function (PDF) estimate) for the parameters and the initial state (t=0). If provided, overlays the prior density for each variable and the true value.
+# -----------------------------------------------------------------------------
+# Signed histogram "density" (diagnostic): can be negative.
+# IMPORTANT: This is not a PDF in general when weights/signs can be negative.
+# -----------------------------------------------------------------------------
+function signed_hist_pdf(x::AbstractVector{<:Real},
+                         s::AbstractVector{<:Real};
+                         nbins::Int=50,
+                         xlim::Union{Nothing,Tuple{Real,Real}}=nothing,
+                         clamp_nonneg::Bool=false)   # <-- default OFF now
+    @assert length(x) == length(s) "x and signs must have the same length."
 
-# Arguments
-- `PMCMC_samples`: PMCMC samples
-- `bins`: number of bins to use for the histogram
-- `prior_pdf`: vector of prior density values for each parameter and latent initial state
-- `true_values`: true values for each parameter and latent initial state
-"""
-function plot_parameter_pdf(PMCMC_samples::Vector{PMCMC_sample}; bins::Int=50, prior_pdf::Union{Nothing,Vector{Tuple{Vector{Float64},Vector{Float64}}}}=nothing, true_values::AbstractVector{<:AbstractFloat}=nothing)
-    # Get number of models.
-    K = size(PMCMC_samples, 1)
+    denom = sum(Float64.(s))
+    if abs(denom) < 1e-12
+        @warn "Sum of signs is ~0; signed histogram is unstable. denom=$(denom)"
+    end
 
-    # Get number of parameters of the PMCMC samples.
-    n_variables = length(PMCMC_samples[1].theta) + size(PMCMC_samples[1].x_m1, 1)
+    xmin, xmax = isnothing(xlim) ? (minimum(x), maximum(x)) : (float(xlim[1]), float(xlim[2]))
+    if xmin == xmax
+        xmin -= 1.0
+        xmax += 1.0
+    end
 
-    # Fill matrix with the series of the parameters of the PMCMC samples.
+    edges  = collect(range(xmin, stop=xmax, length=nbins+1))
+    binw   = edges[2] - edges[1]
+    counts = zeros(Float64, nbins)
+
+    @inbounds for i in eachindex(x)
+        xi = float(x[i])
+        if xi < edges[1] || xi > edges[end]
+            continue
+        end
+        b = (xi == edges[end]) ? nbins : searchsortedlast(edges, xi)
+        if 1 <= b <= nbins
+            counts[b] += float(s[i])
+        end
+    end
+
+    dens = (counts ./ denom) ./ binw   # can be negative
+
+    if clamp_nonneg
+        # Diagnostic-only: makes it *look* like a PDF, but biases shape.
+        dens = max.(dens, 0.0)
+        area = sum(dens) * binw
+        if area > 0
+            dens ./= area
+        else
+            @warn "All bins are zero after clamping; cannot renormalize."
+        end
+    end
+
+    centers = 0.5 .* (edges[1:end-1] .+ edges[2:end])
+    return centers, dens, edges, denom
+end
+
+# -----------------------------------------------------------------------------
+# Posterior PDFs for θ and x(t=0)
+# - Always plot a proper (unsigned) posterior density.
+# - If signs are given: overlay signed posterior mean (ratio estimator).
+# - Optionally: overlay raw signed bin "density" (can be negative) for diagnostics.
+# -----------------------------------------------------------------------------
+function plot_parameter_pdf(
+    PMCMC_samples::AbstractVector;
+    bins::Int=50,
+    prior_pdf::Union{Nothing,Vector{Tuple{Vector{Float64},Vector{Float64}}}}=nothing,
+    true_values::Union{Nothing,AbstractVector{<:AbstractFloat}}=nothing,
+    signs::Union{Nothing,AbstractVector{<:Real}}=nothing,
+    burn::Int=0,
+    show_signed_density::Bool=false,  # <-- new (default off)
+    clamp_nonneg::Bool=false          # <-- default OFF now
+)
+    K = length(PMCMC_samples)
+    @assert K >= 1 "Need at least one PMCMC sample."
+
+    θlen = length(PMCMC_samples[1].theta)
+    xdim = size(PMCMC_samples[1].x_m1, 1)
+    n_variables = θlen + xdim
+
+    # Draws: (θ, x0) by sampling x0 from PF particles each iteration
     sample_matrix = Array{Float64}(undef, K, n_variables)
     for i in 1:K
-        # Sample state at the last timestep of the training dataset.
-        #=
-        star = sample(1:length(PMCMC_samples[i].w_m1), Weights(PMCMC_samples[i].w_m1))
-        x_m1 = PMCMC_samples[i].x_m1[:, star]
-        sample_matrix[i, :] .= [PMCMC_samples[i].theta; vec(x_m1)]
-        =#
-
-        # Sample state at the first timestep of the training dataset.
         star = sample(1:length(PMCMC_samples[i].w_0), Weights(PMCMC_samples[i].w_0))
-        x_0 = PMCMC_samples[i].x_0[:, star]
+        x_0  = PMCMC_samples[i].x_0[:, star]
         sample_matrix[i, :] .= [PMCMC_samples[i].theta; vec(x_0)]
     end
 
+    # burn handling
+    i0   = max(1, burn + 1)
+    Smat = @view sample_matrix[i0:end, :]
+
+    Ssign = nothing
+    if signs !== nothing
+        @assert length(signs) == K "signs must align with stored PMCMC_samples."
+        Ssign = @view signs[i0:end]
+    end
+
     for i in 1:n_variables
-        p = histogram(sample_matrix[:, i], bins=bins, normalize=:pdf, label="Posterior")
+        vals = vec(@view Smat[:, i])
 
-        # Plot prior if provided
-        if !isnothing(prior_pdf) && i <= length(prior_pdf)
-            value, density = prior_pdf[i]
-            plot!(value, density, label="Prior", linestyle=:dash, lw=2)
+        # --- Always: proper posterior density (ignoring sign) ---
+        p = histogram(
+            vals;
+            bins = bins,
+            normalize = :pdf,
+            label = (Ssign === nothing ? "Posterior" : "Posterior (ignoring sign)"),
+            legendfontsize = THESIS_LEGEND_FSIZE,
+            guidefontsize  = THESIS_LABEL_FSIZE,
+            tickfontsize   = THESIS_TICK_FSIZE,
+            titlefontsize  = THESIS_TITLE_FSIZE,
+        )
+
+        # --- Signed overlay: mean only (statistically well-defined via ratio) ---
+        if Ssign !== nothing
+            μs, denom = signed_mean_scalar(vals, collect(Ssign))
+            vline!(p, [μs]; label="Signed mean", linestyle=:dot, lw=THESIS_LW)
+
+            # Optional: diagnostic signed bin density (can go negative)
+            if show_signed_density
+                centers, dens, edges, denom2 = signed_hist_pdf(vals, collect(Ssign);
+                                                              nbins=bins,
+                                                              clamp_nonneg=clamp_nonneg)
+                binw = edges[2] - edges[1]
+
+                plot!(p, centers, dens;
+                      seriestype=:bar,
+                      bar_width=binw,
+                      alpha=0.20,
+                      label = clamp_nonneg ? "Signed bin density (clamped; biased)" :
+                                             "Signed bin density (diagnostic; can be <0)")
+
+                hline!(p, [0.0]; lw=1, label="")  # zero baseline for signed bars
+                @printf("[signed pdf diag] var %d: denom=sum(signs)=%.4e (burn=%d)\n", i, denom2, burn)
+            end
         end
 
-        # Plot true value if provided
-        if !isnothing(true_values) && i <= length(true_values)
-            plot!([true_values[i]], seriestype=:vline, label="True", lw=2)
+        # Prior overlay (if given)
+        if prior_pdf !== nothing && i <= length(prior_pdf)
+            xs, ds = prior_pdf[i]
+            plot!(p, xs, ds; label="Prior", linestyle=:dash, lw=THESIS_LW)
         end
 
-        if i <= length(PMCMC_samples[1].theta)
+        # True value overlay (if given)
+        if true_values !== nothing && i <= length(true_values)
+            vline!(p, [true_values[i]]; label="True", lw=THESIS_LW)
+        end
+
+        # Titles/labels
+        if i <= θlen
             title!("Sample PDF of \$\\theta_{$i}\$")
             xlabel!("\$\\theta_{$i}\$")
         else
-            title!("Sample PDF of \$x_{$(i-length(PMCMC_samples[1].theta))}(t=0)\$")
-            xlabel!("\$x_{$(i-length(PMCMC_samples[1].theta))}\$")
+            idx = i - θlen
+            title!("Sample PDF of \$x_{$idx}(t=0)\$")
+            xlabel!("\$x_{$idx}\$")
         end
         ylabel!("Density")
+
         display(p)
     end
+
+    return nothing
+end
+
+
+# -----------------------------------------------------------------------------
+# Signed histogram density estimator (posterior density under signed correction)
+# Returns centers, dens, edges, denom, binw.
+# dens integrates to 1 if denom != 0, but may be negative on some bins.
+# -----------------------------------------------------------------------------
+function signed_hist_density(x::AbstractVector{<:Real},
+                             s::AbstractVector{<:Real};
+                             nbins::Int=50,
+                             xlim::Union{Nothing,Tuple{Real,Real}}=nothing)
+
+    @assert length(x) == length(s)
+
+    w = Float64.(s)
+    denom = sum(w)
+
+    xmin, xmax = isnothing(xlim) ? (minimum(x), maximum(x)) : (float(xlim[1]), float(xlim[2]))
+    if xmin == xmax
+        xmin -= 1.0
+        xmax += 1.0
+    end
+
+    edges = collect(range(xmin, stop=xmax, length=nbins+1))
+    binw  = edges[2] - edges[1]
+    counts = zeros(Float64, nbins)
+
+    @inbounds for i in eachindex(x)
+        xi = float(x[i])
+        if xi < edges[1] || xi > edges[end]
+            continue
+        end
+        b = (xi == edges[end]) ? nbins : searchsortedlast(edges, xi)
+        if 1 <= b <= nbins
+            counts[b] += w[i]
+        end
+    end
+
+    if abs(denom) < 1e-12
+        # Unstable; still return something (caller should warn)
+        dens = zeros(Float64, nbins)
+    else
+        dens = (counts ./ denom) ./ binw
+    end
+
+    centers = 0.5 .* (edges[1:end-1] .+ edges[2:end])
+    return centers, dens, edges, denom, binw
+end
+function plot_parameter_pdf_split_instrumental(PMCMC_samples::AbstractVector;
+                                               bins::Int=50,
+                                               prior_pdf=nothing,
+                                               true_values=nothing,
+                                               burn::Int=0)
+
+    K = length(PMCMC_samples)
+    @assert K >= 1
+
+    θlen = length(PMCMC_samples[1].theta)
+    xdim = size(PMCMC_samples[1].x_m1, 1)          # <-- SPLIT state dim
+    n_variables = θlen + xdim
+
+    # sample (θ, x_split*) where x_split* ~ p(x|y_train,θ) from PF at split
+    sample_matrix = Array{Float64}(undef, K, n_variables)
+    for i in 1:K
+        star = sample(1:length(PMCMC_samples[i].w_m1), Weights(PMCMC_samples[i].w_m1))
+        xS   = PMCMC_samples[i].x_m1[:, star]       # <-- SPLIT cloud
+        sample_matrix[i, :] .= [PMCMC_samples[i].theta; vec(xS)]
+    end
+
+    i0   = max(1, burn + 1)
+    Smat = @view sample_matrix[i0:end, :]
+
+    for j in 1:n_variables
+        vals = vec(@view Smat[:, j])
+
+        p = histogram(vals;
+            bins=bins, normalize=:pdf,
+            c=:blue, alpha=0.25, linecolor=:blue,
+            label="posterior (instrumental)",
+            legend=:topright,
+            legendfontsize=THESIS_LEGEND_FSIZE,
+            guidefontsize=THESIS_LABEL_FSIZE,
+            tickfontsize=THESIS_TICK_FSIZE,
+            titlefontsize=THESIS_TITLE_FSIZE,
+        )
+
+        # prior only for θ if provided (we pass only θ priors)
+        if prior_pdf !== nothing && j <= length(prior_pdf)
+            xs, ds = prior_pdf[j]
+            plot!(p, xs, ds; lc=:green, lw=max(2, Int(round(0.70*THESIS_LW))), alpha=0.85, label="prior")
+        end
+
+        if true_values !== nothing && j <= length(true_values)
+            vline!(p, [true_values[j]]; lc=:red, lw=max(2, Int(round(1.20*THESIS_LW))), label="true")
+        end
+
+        if j <= θlen
+            title!(p, "Posterior of \$\\theta_{$j}\$")
+            xlabel!(p, "\$\\theta_{$j}\$")
+        else
+            idx = j - θlen
+            title!(p, "Posterior of \$x_{$idx}\$ at split (end of train)")
+            xlabel!(p, "\$x_{$idx}\$")
+        end
+        ylabel!(p, "Density")
+        display(p)
+    end
+    return nothing
+end
+
+
+function plot_parameter_pdf_split_signed_only(PMCMC_samples::AbstractVector;
+                                              bins::Int=50,
+                                              prior_pdf=nothing,
+                                              true_values=nothing,
+                                              signs::AbstractVector{<:Real},
+                                              burn::Int=0)
+
+    K = length(PMCMC_samples)
+    @assert K >= 1
+    @assert length(signs) == K
+
+    θlen = length(PMCMC_samples[1].theta)
+    xdim = size(PMCMC_samples[1].x_m1, 1)          # <-- SPLIT state dim
+    n_variables = θlen + xdim
+
+    # signed histogram of (θ, x_split*)
+    sample_matrix = Array{Float64}(undef, K, n_variables)
+    for i in 1:K
+        star = sample(1:length(PMCMC_samples[i].w_m1), Weights(PMCMC_samples[i].w_m1))
+        xS   = PMCMC_samples[i].x_m1[:, star]       # <-- SPLIT cloud
+        sample_matrix[i, :] .= [PMCMC_samples[i].theta; vec(xS)]
+    end
+
+    i0   = max(1, burn + 1)
+    Smat = @view sample_matrix[i0:end, :]
+    Ssgn = Float64.(@view signs[i0:end])
+
+    for j in 1:n_variables
+        vals = vec(@view Smat[:, j])
+        centers, dens, edges, denom, binw = signed_hist_density(vals, Ssgn; nbins=bins)
+
+        p = plot(centers, dens;
+            seriestype=:bar, bar_width=binw,
+            c=:blue, alpha=0.30, linecolor=:blue,
+            label="signed posterior density",
+            legend=:topright,
+            legendfontsize=THESIS_LEGEND_FSIZE,
+            guidefontsize=THESIS_LABEL_FSIZE,
+            tickfontsize=THESIS_TICK_FSIZE,
+            titlefontsize=THESIS_TITLE_FSIZE,
+        )
+        hline!(p, [0.0]; lw=1, lc=:black, label="")
+
+        if prior_pdf !== nothing && j <= length(prior_pdf)
+            xs, ds = prior_pdf[j]
+            plot!(p, xs, ds; lc=:green, lw=max(2, Int(round(0.70*THESIS_LW))), alpha=0.85, label="prior")
+        end
+
+        if true_values !== nothing && j <= length(true_values)
+            vline!(p, [true_values[j]]; lc=:red, lw=max(2, Int(round(1.20*THESIS_LW))), label="true")
+        end
+
+        if j <= θlen
+            title!(p, "Signed posterior density of \$\\theta_{$j}\$")
+            xlabel!(p, "\$\\theta_{$j}\$")
+        else
+            idx = j - θlen
+            title!(p, "Signed posterior density of \$x_{$idx}\$ at split")
+            xlabel!(p, "\$x_{$idx}\$")
+        end
+        ylabel!(p, "Density (signed)")
+        display(p)
+    end
+    return nothing
+end
+
+# -----------------------------------------------------------------------------
+# Signed posterior PDF plotter (θ and x0)
+# -----------------------------------------------------------------------------
+function plot_parameter_pdf_instrumental(PMCMC_samples::AbstractVector;
+                                         bins::Int=50,
+                                         prior_pdf::Union{Nothing,Vector{Tuple{Vector{Float64},Vector{Float64}}}}=nothing,
+                                         true_values::Union{Nothing,AbstractVector{<:AbstractFloat}}=nothing,
+                                         burn::Int=0)
+
+    K = length(PMCMC_samples)
+    @assert K >= 1
+
+    θlen = length(PMCMC_samples[1].theta)
+    xdim = size(PMCMC_samples[1].x_0, 1)
+    n_variables = θlen + xdim
+
+    # Per-iter sample (theta, x0*) where x0* is sampled from PF at that iter
+    sample_matrix = Array{Float64}(undef, K, n_variables)
+    for i in 1:K
+        star = sample(1:length(PMCMC_samples[i].w_0), Weights(PMCMC_samples[i].w_0))
+        x0s  = PMCMC_samples[i].x_0[:, star]
+        sample_matrix[i, :] .= [PMCMC_samples[i].theta; vec(x0s)]
+    end
+
+    i0   = max(1, burn + 1)
+    Smat = @view sample_matrix[i0:end, :]
+
+    for j in 1:n_variables
+        vals = vec(@view Smat[:, j])
+
+        p = histogram(vals;
+            bins=bins,
+            normalize=:pdf,
+            c=COL_POST,
+            alpha=ALPHA_POST,
+            linecolor=COL_POST,
+            label="posterior (ignoring sign)",
+            legend=:topright,
+            legendfontsize=THESIS_LEGEND_FSIZE,
+            guidefontsize=THESIS_LABEL_FSIZE,
+            tickfontsize=THESIS_TICK_FSIZE,
+            titlefontsize=THESIS_TITLE_FSIZE,
+        )
+
+        # Prior
+        if prior_pdf !== nothing && j <= length(prior_pdf)
+            xs, ds = prior_pdf[j]
+            plot!(p, xs, ds; lc=COL_PRIOR, lw=LW_PRI, alpha=ALPHA_PRI, label="prior")
+        end
+
+        # True value
+        if true_values !== nothing && j <= length(true_values)
+            vline!(p, [true_values[j]]; lc=COL_TRUE, lw=LW_TRUE, label="true")
+        end
+
+        if j <= θlen
+            title!(p, "Instrumental posterior of \$\\theta_{$j}\$ (ignoring sign)")
+            xlabel!(p, "\$\\theta_{$j}\$")
+        else
+            idx = j - θlen
+            title!(p, "Instrumental posterior of \$x_{$idx}(t=0)\$ (ignoring sign)")
+            xlabel!(p, "\$x_{$idx}\$")
+        end
+        ylabel!(p, "Density")
+        display(p)
+    end
+    return nothing
+end
+
+
+
+function plot_parameter_pdf_signed_only(PMCMC_samples::AbstractVector;
+                                        bins::Int=50,
+                                        prior_pdf::Union{Nothing,Vector{Tuple{Vector{Float64},Vector{Float64}}}}=nothing,
+                                        true_values::Union{Nothing,AbstractVector{<:AbstractFloat}}=nothing,
+                                        signs::AbstractVector{<:Real},
+                                        burn::Int=0)
+
+    K = length(PMCMC_samples)
+    @assert K >= 1
+    @assert length(signs) == K
+
+    θlen = length(PMCMC_samples[1].theta)
+    xdim = size(PMCMC_samples[1].x_0, 1)
+    n_variables = θlen + xdim
+
+    sample_matrix = Array{Float64}(undef, K, n_variables)
+    for i in 1:K
+        star = sample(1:length(PMCMC_samples[i].w_0), Weights(PMCMC_samples[i].w_0))
+        x0s  = PMCMC_samples[i].x_0[:, star]
+        sample_matrix[i, :] .= [PMCMC_samples[i].theta; vec(x0s)]
+    end
+
+    i0   = max(1, burn + 1)
+    Smat = @view sample_matrix[i0:end, :]
+    Ssgn = Float64.( @view signs[i0:end] )
+
+    for j in 1:n_variables
+        vals = vec(@view Smat[:, j])
+
+        centers, dens, edges, denom, binw = signed_hist_density(vals, Ssgn; nbins=bins)
+
+        p = plot(centers, dens;
+            seriestype=:bar,
+            bar_width=binw,
+            c=COL_POST,
+            alpha=ALPHA_SIGN,
+            linecolor=COL_POST,
+            label="signed posterior density",
+            legend=:topright,
+            legendfontsize=THESIS_LEGEND_FSIZE,
+            guidefontsize=THESIS_LABEL_FSIZE,
+            tickfontsize=THESIS_TICK_FSIZE,
+            titlefontsize=THESIS_TITLE_FSIZE,
+        )
+
+        # zero baseline
+        hline!(p, [0.0]; lw=1, lc=COL_ZERO, label="")
+
+        # Prior
+        if prior_pdf !== nothing && j <= length(prior_pdf)
+            xs, ds = prior_pdf[j]
+            plot!(p, xs, ds; lc=COL_PRIOR, lw=LW_PRI, alpha=ALPHA_PRI, label="prior")
+        end
+
+        # True value
+        if true_values !== nothing && j <= length(true_values)
+            vline!(p, [true_values[j]]; lc=COL_TRUE, lw=LW_TRUE, label="true")
+        end
+
+        if j <= θlen
+            title!(p, "Signed posterior density of \$\\theta_{$j}\$")
+            xlabel!(p, "\$\\theta_{$j}\$")
+        else
+            idx = j - θlen
+            title!(p, "Signed posterior density of \$x_{$idx}(t=0)\$")
+            xlabel!(p, "\$x_{$idx}\$")
+        end
+        ylabel!(p, "Density (signed)")
+
+        if abs(denom) < 1e-8 * length(Ssgn)
+            @printf("[plot_parameter_pdf_signed_only] WARNING var %d: denom=sum(signs)=%.4e small -> noisy density.\n", j, denom)
+        end
+
+        display(p)
+    end
+    return nothing
+end
+
+
+function plot_parameter_trace_signed_simplified(PMCMC_samples::AbstractVector;
+                                                signs::Union{Nothing,AbstractVector{<:Real}}=nothing,
+                                                burn::Int=0,
+                                                show_running_signed_mean::Bool=true)
+
+    K = length(PMCMC_samples)
+    @assert K >= 1 "Need at least one PMCMC sample."
+
+    θlen = length(PMCMC_samples[1].theta)
+    xdim = size(PMCMC_samples[1].x_m1, 1)
+    n_variables = θlen + xdim
+
+    # Sample one x_m1 per iteration from PF weights (last training time)
+    sample_matrix = Array{Float64}(undef, K, n_variables)
+    for i in 1:K
+        star = sample(1:length(PMCMC_samples[i].w_m1), Weights(PMCMC_samples[i].w_m1))
+        x_m1 = PMCMC_samples[i].x_m1[:, star]
+        sample_matrix[i, :] .= [PMCMC_samples[i].theta; vec(x_m1)]
+    end
+
+    i0 = max(1, burn + 1)
+    iters = collect(0:(K-1))
+    itv = @view iters[i0:end]
+    Smat = @view sample_matrix[i0:end, :]
+
+    Ssign = nothing
+    pos = Int[]
+    neg = Int[]
+    if signs !== nothing
+        @assert length(signs) == K "signs must align with stored PMCMC_samples."
+        Ssign = Float64.( @view signs[i0:end] )
+        pos = findall(>(0), Ssign)
+        neg = findall(<(0), Ssign)
+    end
+
+    for j in 1:n_variables
+        y = vec(@view Smat[:, j])
+
+        p = plot(
+            itv, y;
+            lw=LW_MAIN,
+            lc=COL_POST,
+            label="trace",
+            legend=:topright,
+            legendfontsize=THESIS_LEGEND_FSIZE,
+            guidefontsize=THESIS_LABEL_FSIZE,
+            tickfontsize=THESIS_TICK_FSIZE,
+            titlefontsize=THESIS_TITLE_FSIZE,
+        )
+
+        if Ssign !== nothing
+            # sign markers (keep)
+            if !isempty(pos)
+                scatter!(p, itv[pos], y[pos];
+                         ms=THESIS_MS,
+                         markershape=:circle,
+                         markerstrokecolor=COL_POST,
+                         markercolor=:white,
+                         label="sign=+")
+            end
+            if !isempty(neg)
+                scatter!(p, itv[neg], y[neg];
+                         ms=THESIS_MS,
+                         markershape=:x,
+                         markerstrokecolor=COL_POST,
+                         label="sign=-")
+            end
+
+            # running signed mean: marker-only (no linestyle)
+            if show_running_signed_mean
+                num = cumsum(Ssign .* y)
+                den = cumsum(Ssign)
+                run = similar(num)
+                @inbounds for t in eachindex(num)
+                    run[t] = (abs(den[t]) < 1e-12) ? NaN : (num[t] / den[t])
+                end
+                scatter!(p, itv, run;
+                         ms=max(4, Int(round(0.60 * THESIS_MS))),
+                         markershape=:diamond,
+                         markerstrokecolor=COL_POST,
+                         markercolor=:white,
+                         label="running signed mean")
+            end
+        end
+
+        if j <= θlen
+            title!(p, "Trace of \$\\theta_{$j}\$")
+            ylabel!(p, "\$\\theta_{$j}\$")
+        else
+            idx = j - θlen
+            title!(p, "Trace of \$x_{$idx}\$")
+            ylabel!(p, "\$x_{$idx}(t-1)\$")
+        end
+        xlabel!(p, "Iteration")
+        display(p)
+    end
+    return nothing
 end

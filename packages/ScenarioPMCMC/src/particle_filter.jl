@@ -45,14 +45,14 @@ function particle_filter(u::AbstractMatrix{<:AbstractFloat}, y::AbstractMatrix{<
         end
 
         # PF weight update based on measurement model (logarithms are used for numerical reasons).
-        log_w .= log_pdf_w(y[:, t] .- g(x_pf[:, t, :], repeat(u[:, t], 1, N)))
-        max_log_w = maximum(log_w)
-        w[[t], :] .= exp.(log_w .- max_log_w)
-        sum_w = sum(w[t, :])
-        w[t, :] .= w[t, :] ./ sum_w
+        log_w .= log_pdf_w(y[:, t] .- g(x_pf[:, t, :], repeat(u[:, t], 1, N)))  #log_w is 1×N: y - g(x_pf,u) is n_y×N, log_pdf_w returns 1×N
+        max_log_w = maximum(log_w)                                              #biggest difference to avoid numerical issues
+        w[[t], :] .= exp.(log_w .- max_log_w)                                   #subtract max for numerical stability 
+        sum_w = sum(w[t, :])                                                    #sum of weights for normalization
+        w[t, :] .= w[t, :] ./ sum_w                                             #normalize weights
 
         # Estimate log-likelihood.
-        log_likelihood += log(sum_w) + max_log_w - log(N)
+        log_likelihood += log(sum_w) + max_log_w - log(N)                       #log of likelihood increment
     end
-    return x_pf, w, log_likelihood
+    return x_pf, w, log_likelihood                                              
 end
