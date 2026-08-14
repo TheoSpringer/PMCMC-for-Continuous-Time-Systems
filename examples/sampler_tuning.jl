@@ -35,7 +35,22 @@ n_u = 3 # number of control inputs
 n_y = 2 # number of outputs
 
 # State transition function.
-f_theta(theta, x, u) = SIMPLE.f_theta(theta, x, u)
+f_theta(theta, x, u) = SIMPLE.f_theta(theta, x, u)  # change this to a integral and it has to be time dependent 
+
+
+
+
+
+
+"
+this is in environment.jl ganz unten
+"
+
+
+
+
+
+
 
 # Zero-mean Gaussian process noise with variance Q - assumed to be known (without loss of generality).
 Q = Diagonal([0.01^2, 0.1^2, 0.1^2]) # variance of process noise
@@ -51,7 +66,7 @@ sample_w_theta(theta, N) = rand(MvNormal(zeros(n_y), R), N) # sample measurement
 log_pdf_w_theta(theta, w) = -0.5 * sum(w .* (R \ w), dims=1) # log pdf of measurement noise, scaling 
 
 # Prior for parameters.
-theta_mean = [
+theta_mean = [ #start on dimensional at first - only use one
     2550.0,   # tau_sum
     535.0    # Ia
 ]
