@@ -87,7 +87,6 @@ function step(parameters::SIMPLE_parameters, state::SIMPLE_state, input::SIMPLE_
     # Return a new state object that holds the new values and history
     return SIMPLE_state(mB_next, tau_next, I50B_next)
 end
-
 """
     get_yield(parameters::SIMPLE_parameters, state::SIMPLE_state)
 
